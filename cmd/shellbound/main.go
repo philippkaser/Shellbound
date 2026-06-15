@@ -31,7 +31,7 @@ func envOr(key, def string) string {
 }
 
 func main() {
-	addr := envOr("SHELLBOUND_ADDR", ":2222")
+	addr := envOr("SHELLBOUND_ADDR", ":80")
 	dbPath := envOr("SHELLBOUND_DB", "./shellbound.db")
 	hostKey := envOr("SHELLBOUND_HOSTKEY", "./.ssh/shellbound_ed25519")
 

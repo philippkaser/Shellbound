@@ -7,7 +7,7 @@ exactly three splashes of color — player names, chat usernames, and the
 rainbow shimmer of the portals.
 
 ```
-ssh -p 2222 your-server
+ssh -p 80 your-server
 ```
 
 No account. No password. Your SSH key *is* your identity: the first visit
@@ -20,14 +20,14 @@ Requires Go 1.22+ and nothing else (the SQLite driver is pure Go — no CGO).
 
 ```sh
 go mod tidy        # first time only: resolves deps, writes go.sum
-make run           # listens on :2222, creates ./shellbound.db and a host key
+make run           # listens on :80, creates ./shellbound.db and a host key
 ```
 
 Configuration is via environment variables:
 
 | Variable             | Default                       | Meaning                |
 | -------------------- | ----------------------------- | ---------------------- |
-| `SHELLBOUND_ADDR`    | `:2222`                       | SSH listen address     |
+| `SHELLBOUND_ADDR`    | `:80`                       | SSH listen address     |
 | `SHELLBOUND_DB`      | `./shellbound.db`             | SQLite database file   |
 | `SHELLBOUND_HOSTKEY` | `./.ssh/shellbound_ed25519`   | Host key (auto-created)|
 

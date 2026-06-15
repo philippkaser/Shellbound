@@ -29,7 +29,7 @@ import (
 
 // Config wires the server's collaborators.
 type Config struct {
-	Addr        string // listen address, e.g. ":2222"
+	Addr        string // listen address, e.g. ":80"
 	HostKeyPath string // ed25519 host key (created if missing)
 	Hub         *hub.Hub
 	Repos       *storage.Repos

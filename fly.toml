@@ -6,11 +6,11 @@ source = "data"
 destination = "/data"
 
 [[services]]
-internal_port = 22
+internal_port = 80
 protocol = "tcp"
 
   [[services.ports]]
-  port = 22
+  port = 80
 
   [[services.tcp_checks]]
   interval = "15s"

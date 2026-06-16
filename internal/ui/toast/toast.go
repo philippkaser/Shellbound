@@ -58,3 +58,12 @@ func (m *Model) View() string {
 	}
 	return m.theme.Toast.Render(m.queue[0].text)
 }
+
+// Message returns the visible toast's text, or "" when idle. The pixel
+// renderer bakes this into the frame as an inverse banner.
+func (m *Model) Message() string {
+	if len(m.queue) == 0 {
+		return ""
+	}
+	return m.queue[0].text
+}

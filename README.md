@@ -2,9 +2,11 @@
 
 A tiny MMO that lives entirely inside your terminal. Connect over SSH and
 you're standing in a shared plaza: walk around, watch other players wander
-past, chat, whisper, make friends. Strict black-and-white pixel art with
-exactly three splashes of color — player names, chat usernames, and the
-rainbow shimmer of the portals.
+past, chat, whisper, make friends. The plaza is drawn as **isometric pixel
+art** using real terminal graphics (Sixel) — strict black-and-white, with
+exactly three splashes of color (player names, chat usernames, and the rainbow
+shimmer of the portals) and interactive lighting that follows you and pools
+around the lamps.
 
 ```
 ssh -p 80 your-server
@@ -30,6 +32,8 @@ Configuration is via environment variables:
 | `SHELLBOUND_ADDR`    | `:80`                       | SSH listen address     |
 | `SHELLBOUND_DB`      | `./shellbound.db`             | SQLite database file   |
 | `SHELLBOUND_HOSTKEY` | `./.ssh/shellbound_ed25519`   | Host key (auto-created)|
+| `SHELLBOUND_SIXEL`   | `on`                          | Set `off` to serve a "use a Sixel terminal" notice instead of graphics |
+| `SHELLBOUND_CELL`    | `8x16`                        | Assumed terminal cell size in pixels (`WxH`); raise it to fill the window, lower it if the image scrolls |
 
 Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 
@@ -38,8 +42,12 @@ Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 > `go.mod` has been yanked upstream, `go get <module>@latest` will move it
 > forward; the code sticks to long-stable APIs of these libraries.
 
-Your terminal should support 24-bit color (practically all modern
-terminals do) and ideally use a dark/black background.
+Your terminal **must support Sixel graphics** and 24-bit color, and should use
+a dark/black background. Known-good clients: WezTerm, foot, mlterm, Konsole,
+contour, recent Windows Terminal, and `xterm -ti vt340`. Sixel support cannot
+be reliably auto-detected over the SSH input path, so the server assumes it is
+present; set `SHELLBOUND_SIXEL=off` for a deployment whose users lack it and
+everyone is shown a short "connect with a Sixel terminal" notice instead.
 
 ## Controls
 
@@ -66,17 +74,24 @@ Enter on a name pre-fills a `/w` to them.
 - **Identity.** `SHA256` fingerprint of the client's public key, mapped to
   a row in `players`. Colors come from `sha256(fingerprint)[0]` into a
   curated 24-color palette, so a player's color is stable forever.
-- **Rendering.** The plaza is drawn on a half-block framebuffer
-  (`internal/render/halfblock`): every terminal cell carries two stacked
-  pixels via `▀` with independent fg/bg, giving 100×100 pixels on a
-  100×50-cell map. A glyph layer on top carries walls, benches, text and
-  name tags. A quadrant-block buffer (`internal/render/pixelbuf`) provides
-  2×2 sub-pixels per cell for the drifting clouds. The hot path emits
-  run-length-minimized raw SGR sequences; the SSH layer pins sessions to
-  TrueColor so output is deterministic.
-- **Camera.** A `harmonica` spring per axis follows the player with slight
-  lag; the viewport crops when the terminal is smaller than the map and
-  letterboxes when larger. Below 60×20 cells, a resize prompt shows.
+- **Rendering.** The plaza is baked into a true RGB pixel framebuffer
+  (`internal/render/canvas`) and shipped as one Sixel image per frame
+  (`internal/render/sixel`, a fixed-palette run-length encoder). The world is
+  projected to a 2:1 **isometric** screen space (`internal/render/iso`): ground
+  diamonds and depth-sorted extruded cubes for walls, pillars, benches and the
+  fountain. Avatars are procedural pixel art (`internal/render/sprites`); text
+  (names, chat, HUD, panels) is baked with a 5×7 bitmap font so the entire frame
+  composites in one place. **Interactive lighting** (`internal/render/light`)
+  dims the plaza and lets the player and lamps reveal it, with blocky glow
+  halos. Bubble Tea's line renderer can't host a Sixel image, so the plaza
+  returns a constant `View` (keeping that renderer quiescent) and writes frames
+  itself to a mutex-guarded session writer (`internal/render/syncwriter`) shared
+  with Bubble Tea; the SSH layer pins sessions to TrueColor.
+- **Camera.** A `harmonica` spring per axis follows the player in grid space
+  with slight lag; each frame that position is projected to isometric screen
+  space and centered in a pixel canvas sized to the terminal (cell grid ×
+  cell-pixel size, capped for bandwidth). Below 60×20 cells, a resize prompt is
+  baked into the frame instead.
 - **Multiplayer.** One in-memory hub holds all sessions. Input is local
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.
@@ -108,9 +123,9 @@ internal/auth/       fingerprints, username rules
 internal/storage/    sqlite, migrations, repositories
 internal/world/      World interface, registry, scoped stores
 internal/worlds/     world implementations (comingsoon)
-internal/plaza/      map, tiles, portals
+internal/plaza/      map, isometric tiles, portals
 internal/ui/         login, overworld, chat, inventory, friends, toast
-internal/render/     halfblock canvas, pixelbuf, sprites, shimmer
+internal/render/     canvas, sixel, iso, light, sprites, shimmer, syncwriter
 internal/style/      palette, themes
 internal/anim/       camera spring, flicker helpers
 ```

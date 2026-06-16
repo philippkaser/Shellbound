@@ -9,7 +9,6 @@ import (
 
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
-	"github.com/shellbound/shellbound/internal/render/halfblock"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
 	"github.com/shellbound/shellbound/internal/ui/login"
@@ -37,7 +36,7 @@ type appDeps struct {
 	repos      *storage.Repos
 	registry   *world.Registry
 	plazaMap   *plaza.Map
-	base       *halfblock.Canvas
+	env        overworld.Env
 	sessionID  string
 	onTeardown func(func())
 }
@@ -100,7 +99,7 @@ func (a *app) join(player storage.Player) {
 	info := hub.PlayerInfo{ID: player.ID, Name: player.Username, Color: player.Color}
 	handle, snapshot := a.deps.hub.Join(a.deps.sessionID, info, spawn)
 	a.handle = handle
-	a.over = overworld.New(a.theme, a.deps.plazaMap, a.deps.base, a.deps.repos, player, handle, snapshot)
+	a.over = overworld.New(a.theme, a.deps.plazaMap, a.deps.env, a.deps.repos, player, handle, snapshot)
 	a.joined = true
 	a.state = statePlaza
 }
@@ -159,8 +158,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		}
 		a.join(*msg.Player)
-		var cmds []tea.Cmd
-		cmds = append(cmds, a.over.Init())
+		// Wipe the login screen before the plaza's Sixel frame paints over it.
+		cmds := []tea.Cmd{tea.ClearScreen, a.over.Init()}
 		if a.lastSize.Width > 0 {
 			var cmd tea.Cmd
 			a.over, cmd = a.over.Update(a.lastSize)
@@ -183,6 +182,10 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.state = statePlaza
 			a.worldModel = nil
 			a.over = a.over.ResumeFromWorld()
+			// Clear the world's text screen, then repaint the plaza frame.
+			var cmd tea.Cmd
+			a.over, cmd = a.over.Update(a.lastSize)
+			return a, tea.Batch(a.listenInternal(), tea.ClearScreen, cmd)
 		}
 		return a, a.listenInternal()
 
@@ -261,8 +264,11 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 	}
 	a.worldModel = w.Init(ctx)
 	a.state = stateWorld
+	// The plaza must stop painting Sixel frames while the world owns the
+	// screen; clear its last frame so the world's text renders cleanly.
+	a.over = a.over.SetActive(false)
 
-	cmds := []tea.Cmd{a.worldModel.Init()}
+	cmds := []tea.Cmd{tea.ClearScreen, a.worldModel.Init()}
 	if a.lastSize.Width > 0 {
 		var cmd tea.Cmd
 		a.worldModel, cmd = a.worldModel.Update(a.lastSize)

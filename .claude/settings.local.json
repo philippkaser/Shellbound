@@ -5,7 +5,8 @@
       "Bash(python genmap.py)",
       "Read(//c/c/Users/philipp.kaser/OneDrive - Durst Group AG/Documents/ai benchmark/Shellbound/**)",
       "Bash(go env *)",
-      "Bash(grep -rl \"func.*CursorEnd\" \"$\\(go env GOMODCACHE\\)/github.com/charmbracelet/\")"
+      "Bash(grep -rl \"func.*CursorEnd\" \"$\\(go env GOMODCACHE\\)/github.com/charmbracelet/\")",
+      "Bash(ls \"$\\(go env GOMODCACHE\\)/github.com/charmbracelet/x/ansi@v0.8.0/\")"
     ]
   }
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/shellbound/shellbound/internal/render/halfblock"
+	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/style"
 )
 
@@ -132,6 +132,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Cmd, string) {
 	return cmd, ""
 }
 
+// InputLine returns the plain prompt+value the pixel renderer bakes into the
+// input bar (the textinput's own styled View is not used in the Sixel path).
+func (m *Model) InputLine() string {
+	return m.input.Prompt + m.input.Value()
+}
+
 // ViewInput renders the input bar at the given total width (the bar takes
 // ~60% of it, minimum 24 cells).
 func (m *Model) ViewInput(totalWidth int) string {
@@ -147,11 +153,13 @@ func (m *Model) ViewInput(totalWidth int) string {
 	return m.theme.InputBar.Width(w).Render(m.input.View())
 }
 
-// RenderHistory draws up to maxVisible non-expired lines onto the canvas,
-// bottom-anchored at (x, yBottom), at most maxW cells wide. Fresh lines
-// are white with colored names; lines older than fadeAfter dim to grey;
-// lines older than dropAfter vanish.
-func (m *Model) RenderHistory(c *halfblock.Canvas, now time.Time, x, yBottom, maxW int) {
+// RenderHistory bakes up to maxVisible non-expired lines into the canvas,
+// bottom-anchored so the baseline of the newest line sits at pixel (x,
+// yBottom) and older lines stack upward, clipped to maxWPx pixels wide. Fresh
+// lines are white with the sender's colored name (a sanctioned color pop);
+// lines older than fadeAfter dim to grey; lines older than dropAfter vanish.
+func (m *Model) RenderHistory(c *canvas.Canvas, now time.Time, x, yBottom, maxWPx int) {
+	maxW := maxWPx / canvas.AdvanceX
 	if maxW < 8 {
 		return
 	}
@@ -165,8 +173,8 @@ func (m *Model) RenderHistory(c *halfblock.Canvas, now time.Time, x, yBottom, ma
 		}
 		faded := age >= fadeAfter
 
-		nameCol := halfblock.Hex(e.Color)
-		textCol := halfblock.Color(0xFFFFFF)
+		nameCol := canvas.Hex(e.Color)
+		textCol := canvas.Color(0xFFFFFF)
 		if faded {
 			nameCol = 0x737373
 			textCol = 0x737373
@@ -200,9 +208,10 @@ func (m *Model) RenderHistory(c *halfblock.Canvas, now time.Time, x, yBottom, ma
 
 		pl := utf8.RuneCountInString(prefix)
 		body = truncateRunes(body, maxW-pl)
-		c.WriteText(x, y, prefix, nameCol)
-		c.WriteText(x+pl, y, body, textCol)
-		y--
+		shadow := canvas.Color(0x000000)
+		c.DrawTextShadow(x, y, prefix, nameCol, shadow)
+		c.DrawTextShadow(x+pl*canvas.AdvanceX, y, body, textCol, shadow)
+		y -= canvas.LineH
 		drawn++
 	}
 }

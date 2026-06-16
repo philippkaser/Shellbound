@@ -12,8 +12,10 @@ import (
 	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
-	"github.com/shellbound/shellbound/internal/render/halfblock"
+	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/light"
 	"github.com/shellbound/shellbound/internal/render/shimmer"
+	"github.com/shellbound/shellbound/internal/render/syncwriter"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
 	"github.com/shellbound/shellbound/internal/ui/chat"
@@ -54,14 +56,34 @@ type moveTickMsg time.Time
 type hubEventMsg struct{ ev hub.Event }
 type hubClosedMsg struct{}
 
+// frameDoneMsg is returned after a Sixel frame has been written to the
+// session; it carries no state and exists only to complete the render Cmd.
+type frameDoneMsg struct{}
+
+// Env carries the per-session rendering collaborators the server builds once
+// and hands to every overworld: the shared Sixel palette, the synchronized
+// session writer, and the probed terminal cell size in pixels.
+type Env struct {
+	Pal          *canvas.Palette
+	Out          *syncwriter.Writer
+	CellW, CellH int
+}
+
 // Model is the per-session overworld state.
 type Model struct {
 	theme  style.Theme
 	world  *plaza.Map
-	base   *halfblock.Canvas // shared, read-only static plaza
 	repos  *storage.Repos
 	player storage.Player
 	handle *hub.Handle
+
+	// Rendering: full frames are baked into a pixel canvas and shipped as one
+	// Sixel image straight to the session. active gates whether this model
+	// currently owns the screen (false while a portal world is on top).
+	pal          *canvas.Palette
+	out          *syncwriter.Writer
+	cellW, cellH int
+	active       bool
 
 	// Local avatar: feet position as (cell column, half-block pixel row).
 	px, py    int
@@ -82,22 +104,22 @@ type Model struct {
 	toasts  toast.Model
 	unread  map[int64]string // player id -> username with unseen DMs
 
-	field *shimmer.Field
-	start time.Time
+	field  *shimmer.Field
+	lights *light.Field
+	start  time.Time
 
 	termW, termH int
-	screen       *halfblock.Canvas
+	screen       *canvas.Canvas
 	sb           *strings.Builder
 }
 
-// New creates the overworld for a logged-in player. base must be the
-// world-sized canvas produced by plazaMap.RenderBase (it is only ever
-// read). The model joins the hub immediately; snapshot seeds the remote
-// player set.
+// New creates the overworld for a logged-in player. env carries the shared
+// Sixel palette, the session writer and the terminal cell size. The model
+// joins the hub immediately; snapshot seeds the remote player set.
 func New(
 	theme style.Theme,
 	plazaMap *plaza.Map,
-	base *halfblock.Canvas,
+	env Env,
 	repos *storage.Repos,
 	player storage.Player,
 	handle *hub.Handle,
@@ -116,7 +138,11 @@ func New(
 	m := Model{
 		theme:   theme,
 		world:   plazaMap,
-		base:    base,
+		pal:     env.Pal,
+		out:     env.Out,
+		cellW:   env.CellW,
+		cellH:   env.CellH,
+		active:  true,
 		repos:   repos,
 		player:  player,
 		handle:  handle,
@@ -131,11 +157,20 @@ func New(
 		toasts:  toast.New(theme),
 		unread:  make(map[int64]string),
 		field:   shimmer.NewField(),
+		lights:  light.NewField(),
 		start:   time.Now(),
+		screen:  canvas.New(1, 1),
 		sb:      &strings.Builder{},
 	}
 	m.friends = friends.New(theme, repos, player)
 	m.chat.AddSystem("welcome to shellbound — /help for commands")
+	return m
+}
+
+// SetActive marks whether the overworld currently owns the screen. While a
+// portal world is on top it is inactive and emits no frames.
+func (m Model) SetActive(b bool) Model {
+	m.active = b
 	return m
 }
 
@@ -168,17 +203,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termW, m.termH = msg.Width, msg.Height
-		m.screen = nil // rebuilt lazily at the new size
+		if m.active {
+			return m, m.writeFrameCmd(m.renderFrame())
+		}
 		return m, nil
 
 	case animTickMsg:
 		now := time.Time(msg)
 		m.toasts.Tick(now)
 		m.cam.Update(float64(m.px), float64(m.py)/2)
+		if m.active {
+			return m, tea.Batch(animTick(), m.writeFrameCmd(m.renderFrame()))
+		}
 		return m, animTick()
 
 	case moveTickMsg:
 		return m.stepMovement()
+
+	case frameDoneMsg:
+		return m, nil
 
 	case hubEventMsg:
 		next, cmd := m.applyEvent(msg.ev)
@@ -398,11 +441,26 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 }
 
 // ResumeFromWorld is called by the session app when the player exits a
-// portal world: it re-snaps the camera and refreshes presence-dependent
-// UI.
+// portal world: it re-snaps the camera, re-arms rendering and refreshes
+// presence-dependent UI.
 func (m Model) ResumeFromWorld() Model {
 	m.cam.Snap(float64(m.px), float64(m.py)/2)
+	m.active = true
 	return m
+}
+
+// writeFrameCmd writes a pre-built Sixel frame to the session off the update
+// goroutine. The frame string is immutable and the writer is mutex-guarded,
+// so this never races the model or bubbletea's renderer.
+func (m Model) writeFrameCmd(frame string) tea.Cmd {
+	if frame == "" || m.out == nil {
+		return nil
+	}
+	out := m.out
+	return func() tea.Msg {
+		_, _ = out.WriteString(frame)
+		return frameDoneMsg{}
+	}
 }
 
 // Player returns the logged-in player this overworld belongs to.

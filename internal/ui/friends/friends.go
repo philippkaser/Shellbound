@@ -140,6 +140,40 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// Lines returns the panel's content as plain text rows for the pixel renderer
+// to bake into its own box (the lipgloss View is unused in the Sixel path).
+// The highlighted row is marked with a leading "> ".
+func (m *Model) Lines() []string {
+	out := []string{"Friends & Messages", ""}
+	switch {
+	case m.err != nil:
+		out = append(out, "Could not load your people.")
+	case len(m.rows) == 0:
+		out = append(out, "No friends yet.", "Try /friend add <name>.")
+	default:
+		for i, r := range m.rows {
+			if i >= maxListRows {
+				out = append(out, fmt.Sprintf("... and %d more", len(m.rows)-i))
+				break
+			}
+			dot := "-"
+			if m.online[r.player.ID] {
+				dot = "*"
+			}
+			cursor := "  "
+			if i == m.cursor {
+				cursor = "> "
+			}
+			tag := ""
+			if r.hasDMs && !r.isFriend {
+				tag = " (msg)"
+			}
+			out = append(out, cursor+dot+" "+r.player.Username+tag)
+		}
+	}
+	return append(out, "", "up/down select  Enter message  Esc close")
+}
+
 // View renders the panel box.
 func (m *Model) View() string {
 	var b strings.Builder

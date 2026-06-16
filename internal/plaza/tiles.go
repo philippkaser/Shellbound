@@ -1,208 +1,146 @@
 package plaza
 
 import (
+	"sort"
+
 	"github.com/shellbound/shellbound/internal/anim"
-	"github.com/shellbound/shellbound/internal/render/halfblock"
-	"github.com/shellbound/shellbound/internal/render/pixelbuf"
+	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/iso"
 )
 
-// Monochrome tones used by the plaza renderers (the only colors the map
-// itself is allowed to use).
+// Monochrome tones for the plaza (the world is strictly black/white/grey;
+// the only color comes from portals and player names).
 const (
-	toneWhite halfblock.Color = 0xFFFFFF
-	toneLight halfblock.Color = 0xD4D4D4
-	toneMid   halfblock.Color = 0xA1A1A1
-	toneDim   halfblock.Color = 0x737373
-	toneDark  halfblock.Color = 0x404040
+	toneFloor     = canvas.Color(0x0C0C0C)
+	toneFloorEdge = canvas.Color(0x1A1A1A)
+	toneSpeck     = canvas.Color(0x383838)
+	toneSpeckDim  = canvas.Color(0x242424)
+	toneWhite     = canvas.Color(0xF2F2F2)
+	toneLight     = canvas.Color(0xD4D4D4)
+	toneMid       = canvas.Color(0xA1A1A1)
+	toneDim       = canvas.Color(0x6E6E6E)
+	toneDark      = canvas.Color(0x404040)
+	toneShadow    = canvas.Color(0x2A2A2A)
 )
 
-// RenderBase paints every static tile into a world-sized canvas. It runs
-// once at startup; frames blit from the result.
-func (m *Map) RenderBase(c *halfblock.Canvas) {
-	for cy := 0; cy < m.H; cy++ {
-		for cx := 0; cx < m.W; cx++ {
-			switch m.Tile(cx, cy) {
-			case ' ':
-				// Plain floor: pure black, nothing to draw.
-			case '.':
-				// Light speck: single top pixel.
-				c.SetPx(cx, cy*2, toneDark)
-			case ',':
-				// Dark speck: single bottom pixel, dimmer.
-				c.SetPx(cx, cy*2+1, 0x2E2E2E)
-			case '#':
-				m.renderWall(c, cx, cy)
-			case 'P':
-				m.renderPillar(c, cx, cy)
-			case 'B':
-				m.renderBench(c, cx, cy)
-			case 'F':
-				m.renderStatue(c, cx, cy)
-			case 'L':
-				// Post only; the glowing head is dynamic.
-				c.SetGlyph(cx, cy, '┃', toneDim)
+// Structure heights in pixels.
+const (
+	wallH    = 14
+	pillarH  = 22
+	benchH   = 5
+	statueH  = 20
+	lampPost = 20
+)
+
+// project converts a cell to its ground-diamond top vertex in canvas pixels,
+// given the screen-space origin at the canvas's top-left.
+func project(gx, gy int, originSx, originSy float64) (int, int) {
+	sx, sy := iso.Project(float64(gx), float64(gy))
+	return int(sx - originSx), int(sy - originSy)
+}
+
+// RenderIso paints the plaza into the screen canvas: a tiled ground plane and
+// the depth-sorted structures rising from it. (originSx, originSy) is the
+// screen-space point at the canvas's top-left; t is seconds since server
+// start (drives water ripple and statue spray).
+func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
+	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 3)
+	gx0, gy0 = clampi(gx0, 0, m.W-1), clampi(gy0, 0, m.H-1)
+	gx1, gy1 = clampi(gx1, 0, m.W-1), clampi(gy1, 0, m.H-1)
+
+	// Ground plane (flat, so draw order is irrelevant).
+	for gy := gy0; gy <= gy1; gy++ {
+		for gx := gx0; gx <= gx1; gx++ {
+			px, py := project(gx, gy, originSx, originSy)
+			switch tile := m.Tile(gx, gy); tile {
 			case '~':
-				// Water gets a still base so the dynamic pass only needs to
-				// touch visible cells.
-				c.SetGlyph(cx, cy, '░', toneDim)
-			}
-		}
-	}
-	// Second pass: soft shadows cast on the floor to the lower-right of
-	// pillars and the statue base.
-	for cy := 0; cy < m.H; cy++ {
-		for cx := 0; cx < m.W; cx++ {
-			t := m.Tile(cx, cy)
-			if (t == 'P' || t == 'F') && m.Tile(cx, cy+1) != t {
-				if m.Tile(cx+1, cy) == ' ' || m.Tile(cx+1, cy) == '.' || m.Tile(cx+1, cy) == ',' {
-					c.SetGlyph(cx+1, cy, '░', 0x262626)
+				m.drawWater(c, px, py, gx, gy, t)
+			default:
+				iso.DrawDiamond(c, px, py, toneFloor, toneFloorEdge)
+				if tile == '.' {
+					c.Set(px, py+iso.HH, toneSpeck)
+				} else if tile == ',' {
+					c.Set(px, py+iso.HH, toneSpeckDim)
 				}
 			}
 		}
 	}
-}
 
-// renderWall draws one wall cell. The face that borders the plaza floor is
-// brighter so walls read as lit volumes, not flat fills.
-func (m *Map) renderWall(c *halfblock.Canvas, cx, cy int) {
-	facesFloor := m.Tile(cx, cy+1) != '#' || m.Tile(cx, cy-1) != '#' ||
-		m.Tile(cx+1, cy) != '#' || m.Tile(cx-1, cy) != '#'
-	if !facesFloor {
-		// Deep wall: nearly invisible, lets the border fade into black.
-		c.SetGlyph(cx, cy, '█', 0x2E2E2E)
-		return
+	// Structures, painter-sorted back-to-front so near cubes overlap far ones.
+	type cell struct{ gx, gy int }
+	var structs []cell
+	for gy := gy0; gy <= gy1; gy++ {
+		for gx := gx0; gx <= gx1; gx++ {
+			switch m.Tile(gx, gy) {
+			case '#', 'P', 'B', 'F', 'L':
+				structs = append(structs, cell{gx, gy})
+			}
+		}
 	}
-	// Edge wall: a lit cap over a darker body, drawn in pixels for a
-	// beveled look.
-	c.SetPx(cx, cy*2, toneMid)
-	c.SetPx(cx, cy*2+1, toneDark)
-}
-
-// renderPillar draws half of a pillar pair: the capital on top, the shaft
-// at the bottom.
-func (m *Map) renderPillar(c *halfblock.Canvas, cx, cy int) {
-	if m.Tile(cx, cy+1) == 'P' {
-		c.SetGlyph(cx, cy, '▆', toneLight) // capital
-	} else {
-		c.SetGlyph(cx, cy, '█', toneMid) // shaft/base
+	sort.Slice(structs, func(i, j int) bool {
+		return iso.Depth(structs[i].gx, structs[i].gy) < iso.Depth(structs[j].gx, structs[j].gy)
+	})
+	for _, s := range structs {
+		px, py := project(s.gx, s.gy, originSx, originSy)
+		switch m.Tile(s.gx, s.gy) {
+		case '#':
+			iso.DrawCube(c, px, py, wallH, toneMid, toneDark, toneDim)
+		case 'P':
+			iso.DrawCube(c, px, py, pillarH, toneLight, toneDim, toneMid)
+		case 'B':
+			iso.DrawCube(c, px, py, benchH, toneLight, toneDim, toneMid)
+		case 'F':
+			iso.DrawCube(c, px, py, statueH, toneWhite, toneMid, toneLight)
+		case 'L':
+			m.drawLampPost(c, px, py)
+		}
 	}
-}
 
-// renderBench draws one bench segment, with tapered ends.
-func (m *Map) renderBench(c *halfblock.Canvas, cx, cy int) {
-	left := m.Tile(cx-1, cy) == 'B'
-	right := m.Tile(cx+1, cy) == 'B'
-	switch {
-	case !left && right:
-		c.SetGlyph(cx, cy, '▗', toneLight)
-	case left && !right:
-		c.SetGlyph(cx, cy, '▖', toneLight)
-	default:
-		c.SetGlyph(cx, cy, '▄', toneLight)
-	}
-}
-
-// renderStatue draws half of the fountain statue pair.
-func (m *Map) renderStatue(c *halfblock.Canvas, cx, cy int) {
-	if m.Tile(cx, cy+1) == 'F' {
-		c.SetGlyph(cx, cy, '▆', toneLight)
-	} else {
-		c.SetGlyph(cx, cy, '█', toneMid)
-	}
-}
-
-// waterRunes is the ripple cycle for fountain water.
-var waterRunes = [4]rune{'░', '▒', '▓', '▒'}
-
-// RenderDynamic draws the animated decorations (water, lamp glow, statue
-// spray, clouds) into a screen canvas. (ox, oy) is the world cell at the
-// canvas's top-left; t is seconds since server start. Out-of-view cells
-// are clipped by the canvas itself.
-func (m *Map) RenderDynamic(c *halfblock.Canvas, t float64, ox, oy int) {
-	// Fountain ripples: phase varies per-cell so the surface scintillates
-	// outward rather than blinking in unison.
-	for _, p := range m.Water {
-		ph := anim.Phase(t, 3, len(waterRunes), p.X+p.Y*3)
-		c.SetGlyph(p.X-ox, p.Y-oy, waterRunes[ph], toneDim)
-	}
-	// Statue spray: a flickering crest above the capital.
+	// Statue spray crest, flickering above each fountain statue.
 	for _, p := range m.StatueTops {
+		if p.X < gx0 || p.X > gx1 || p.Y < gy0 || p.Y > gy1 {
+			continue
+		}
+		px, py := project(p.X, p.Y, originSx, originSy)
 		ph := anim.Phase(t, 4, 3, p.X)
-		sprayRunes := [3]rune{'░', '▒', '░'}
-		c.SetGlyph(p.X-ox, p.Y-1-oy, sprayRunes[ph], toneMid)
+		crest := []canvas.Color{toneMid, toneLight, toneMid}[ph]
+		topY := py - statueH
+		c.FillCircle(px, topY-4, 2, crest)
+		c.Set(px, topY-7, toneLight)
 	}
-	// Lamp heads: a glowing block whose brightness flickers organically.
-	for _, p := range m.Lamps {
-		k := anim.Flicker(t, p.X*31+p.Y*7)
-		col := halfblock.Color(anim.Scale(uint32(toneWhite), k))
-		c.SetGlyph(p.X-ox, p.Y-1-oy, '█', col)
-	}
-	m.renderClouds(c, t, ox, oy)
 }
 
-// Clouds: monochrome wisps drifting along the top of the plaza, rendered
-// once into quadrant cells via pixelbuf and replayed with a time offset.
-type cloud struct {
-	cells  []pixelbuf.Cell
-	cw, ch int     // cell dimensions
-	y      int     // cell row it drifts along
-	speed  float64 // cells per second
-	phase  float64 // initial offset in cells
+// drawWater renders an animated water tile at ground level: the diamond
+// scintillates between grey levels per-cell so the surface shimmers outward
+// rather than blinking in unison.
+func (m *Map) drawWater(c *canvas.Canvas, px, py, gx, gy int, t float64) {
+	levels := []canvas.Color{0x2A2A2A, 0x3A3A3A, 0x505050, 0x3A3A3A}
+	ph := anim.Phase(t, 3, len(levels), gx+gy*3)
+	iso.DrawDiamond(c, px, py, levels[ph], toneShadow)
 }
 
-var clouds = buildClouds()
-
-// buildClouds pre-renders three cloud shapes from pixel ellipses.
-func buildClouds() []cloud {
-	shape := func(wPx, hPx int, col pixelbuf.Color) ([]pixelbuf.Cell, int, int) {
-		b := pixelbuf.New(wPx, hPx)
-		cxf, cyf := float64(wPx-1)/2, float64(hPx-1)/2
-		for y := 0; y < hPx; y++ {
-			for x := 0; x < wPx; x++ {
-				dx := (float64(x) - cxf) / (cxf + 0.5)
-				dy := (float64(y) - cyf) / (cyf + 0.5)
-				if dx*dx+dy*dy <= 1 {
-					b.Set(x, y, col)
-				}
-			}
-		}
-		return b.Cells(), b.CellWidth(), b.CellHeight()
-	}
-	var out []cloud
-	specs := []struct {
-		wPx, hPx int
-		y        int
-		speed    float64
-		phase    float64
-	}{
-		{18, 4, 3, 1.1, 5},
-		{12, 4, 5, 0.7, 40},
-		{22, 4, 4, 0.9, 70},
-	}
-	for _, s := range specs {
-		cells, cw, ch := shape(s.wPx, s.hPx, 0x404040)
-		out = append(out, cloud{cells: cells, cw: cw, ch: ch, y: s.y, speed: s.speed, phase: s.phase})
-	}
-	return out
+// drawLampPost draws the unlit lamp: a slim post with a white head. The glow
+// and its block-char halo are added by the lighting pass.
+func (m *Map) drawLampPost(c *canvas.Canvas, px, py int) {
+	cx := px
+	baseY := py + iso.HH
+	c.FillRect(cx-1, baseY-lampPost, 2, lampPost, toneDim)
+	c.FillCircle(cx, baseY-lampPost, 2, toneWhite)
 }
 
-// renderClouds draws the drifting clouds, wrapping around the map width.
-func (m *Map) renderClouds(c *halfblock.Canvas, t float64, ox, oy int) {
-	for _, cl := range clouds {
-		// World cell x of the cloud's left edge, wrapped to map width.
-		x0 := int(cl.phase+t*cl.speed) % (m.W + cl.cw)
-		if x0 < 0 {
-			x0 += m.W + cl.cw
-		}
-		x0 -= cl.cw // enter from the left edge
-		for cy := 0; cy < cl.ch; cy++ {
-			for cx := 0; cx < cl.cw; cx++ {
-				cell := cl.cells[cy*cl.cw+cx]
-				if cell.Rune == ' ' {
-					continue
-				}
-				c.SetGlyph(x0+cx-ox, cl.y+cy-oy, cell.Rune, halfblock.Color(cell.FG))
-			}
-		}
+// LampHead returns the canvas pixel of a lamp's glowing head for a cell,
+// given the screen-space origin. Used by the lighting pass.
+func LampHead(gx, gy int, originSx, originSy float64) (int, int) {
+	px, py := project(gx, gy, originSx, originSy)
+	return px, py + iso.HH - lampPost
+}
+
+func clampi(v, lo, hi int) int {
+	if v < lo {
+		return lo
 	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

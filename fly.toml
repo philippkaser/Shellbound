@@ -1,0 +1,54 @@
+# fly.toml app configuration file for shellbound
+#
+# Shellbound is an SSH server (Charm/Wish), NOT an HTTP server, so it is
+# exposed as a raw TCP service. Do not use [http_service] / force_https here:
+# those wrap the connection in HTTP/TLS and would break the SSH handshake.
+#
+# See https://fly.io/docs/reference/configuration/ for details.
+
+app = 'shellbound'
+primary_region = 'fra'
+
+[build]
+  [build.args]
+    GO_VERSION = '1.23.0'
+
+[env]
+  # The app listens on :80 by default; set explicitly and point the DB and
+  # host key at the persistent volume mounted below.
+  SHELLBOUND_ADDR = ':80'
+  SHELLBOUND_DB = '/data/shellbound.db'
+  SHELLBOUND_HOSTKEY = '/data/.ssh/shellbound_ed25519'
+
+# Raw TCP passthrough: external port 80 -> container port 80, no handlers.
+[[services]]
+  protocol = 'tcp'
+  internal_port = 80
+  processes = ['app']
+  # Keep the shared world reachable. auto_stop would drop live SSH sessions
+  # and force a cold start on the next connect.
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = []
+
+  [[services.tcp_checks]]
+    interval = '15s'
+    timeout = '2s'
+    grace_period = '5s'
+
+# Persist the SQLite database and SSH host key. Without this, every restart
+# regenerates the host key (ssh clients warn about a changed key) and wipes
+# all player accounts/progress.
+[mounts]
+  source = 'shellbound_data'
+  destination = '/data'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

@@ -1,111 +1,125 @@
 package overworld
 
 import (
-	"math"
 	"sort"
-	"strings"
 	"time"
-	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
-
+	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
-	"github.com/shellbound/shellbound/internal/render/halfblock"
+	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/iso"
+	"github.com/shellbound/shellbound/internal/render/light"
 	"github.com/shellbound/shellbound/internal/render/sprites"
 )
 
-// View renders one frame. It is defined on *Model so the screen canvas and
-// frame builder can be reused across frames; the session app always holds
-// the model in an addressable field.
-func (m *Model) View() string {
+// Canvas resolution caps. The frame is sized to the terminal's pixel
+// dimensions but bounded here so a huge window can't blow up per-frame Sixel
+// bandwidth; a capped frame simply renders a smaller world view at home.
+const (
+	maxCanvasW = 1600
+	maxCanvasH = 900
+)
+
+// View returns a constant sentinel. The plaza does not render through
+// bubbletea: it bakes a full frame into a pixel canvas and ships it as one
+// Sixel image straight to the session (see writeFrameCmd). Returning the same
+// string every call keeps bubbletea's renderer quiescent so it never clobbers
+// our graphics.
+func (m Model) View() string { return " " }
+
+// canvasDims returns the frame's pixel size from the terminal cell grid and
+// the probed cell size, bounded by the resolution caps.
+func (m *Model) canvasDims() (int, int) {
+	cw, ch := m.cellW, m.cellH
+	if cw <= 0 {
+		cw = 8
+	}
+	if ch <= 0 {
+		ch = 16
+	}
+	pw, ph := m.termW*cw, m.termH*ch
+	if pw > maxCanvasW {
+		pw = maxCanvasW
+	}
+	if ph > maxCanvasH {
+		ph = maxCanvasH
+	}
+	if pw < 1 {
+		pw = 1
+	}
+	if ph < 1 {
+		ph = 1
+	}
+	return pw, ph
+}
+
+// renderFrame bakes one full frame and returns the Sixel string to write. It
+// runs on the bubbletea update goroutine (single-threaded), so reading model
+// state here is race-free; the returned string is then written off-thread.
+func (m *Model) renderFrame() string {
 	if m.termW <= 0 || m.termH <= 0 {
 		return ""
 	}
+	pw, ph := m.canvasDims()
+	m.screen.Resize(pw, ph)
+	m.screen.Clear(canvas.Black)
+
 	if m.termW < minTermW || m.termH < minTermH {
-		return lipgloss.Place(m.termW, m.termH, lipgloss.Center, lipgloss.Center,
-			m.theme.Dim.Render("please resize your terminal to at least 60×20"))
+		msg := "please resize your terminal to at least 60x20"
+		m.screen.DrawText(pw/2-canvas.TextWidth(msg)/2, ph/2, msg, 0xA1A1A1)
+		return m.frameString()
 	}
-
-	viewW := min(m.termW, m.world.W)
-	viewH := min(m.termH, m.world.H)
-	if m.screen == nil || m.screen.W != viewW || m.screen.H != viewH {
-		m.screen = halfblock.New(viewW, viewH)
-	}
-
-	// Camera: spring position is in (cell, cell-row) world space; clamp the
-	// window to the map so edges never show the void.
-	ox := clamp(int(math.Round(m.cam.X))-viewW/2, 0, m.world.W-viewW)
-	oy := clamp(int(math.Round(m.cam.Y))-viewH/2, 0, m.world.H-viewH)
 
 	t := time.Since(m.start).Seconds()
 	now := time.Now()
 
-	// 1. Static base (covers every cell, so no Clear needed).
-	m.screen.Blit(m.base, ox, oy, viewW, viewH, 0, 0)
-	// 2. Animated decorations.
-	m.world.RenderDynamic(m.screen, t, ox, oy)
-	// 3. Portals (the only color on the map).
+	// Camera: project the smoothed grid position and center it.
+	csx, csy := iso.Project(m.cam.X, m.cam.Y)
+	originSx := csx - float64(pw)/2
+	originSy := csy - float64(ph)/2
+
+	// World, portals (the only color on the map), then players on top.
+	m.world.RenderIso(m.screen, originSx, originSy, t)
 	for _, p := range plaza.Portals {
-		p.Render(m.screen, m.field, t, ox, oy)
+		p.RenderIso(m.screen, m.field, t, originSx, originSy)
 	}
-	// 4. Players, painter-sorted by feet row.
-	m.drawPlayers(ox, oy, t)
-	// 5. Chat history, bottom-left.
-	m.chat.RenderHistory(m.screen, now, 1, viewH-2, viewW*2/3)
-	// 6. HUD.
-	m.drawHUD(viewW, viewH)
+	m.drawPlayers(originSx, originSy, t)
 
-	// Materialize rows so overlays can replace whole lines.
-	rows := make([]string, viewH)
-	for y := 0; y < viewH; y++ {
-		m.sb.Reset()
-		m.screen.RenderRow(y, m.sb)
-		rows[y] = m.sb.String()
-	}
+	// Interactive lighting: dim the plaza and let the player and lamps reveal
+	// it, with blocky glow halos. Applied before the UI so text stays readable.
+	m.applyLighting(originSx, originSy, t, pw, ph)
 
-	// Overlays: toast banner, panels, chat input bar.
-	if m.toasts.Active() {
-		overlayRows(rows, []string{m.toasts.View()}, 1, viewW)
-	}
+	// Text overlays, baked into the same image at full brightness.
+	m.chat.RenderHistory(m.screen, now, 4, ph-3*canvas.LineH, pw*2/3)
+	m.drawHUD(pw, ph)
+	m.drawToast(pw)
+
 	switch {
 	case m.friends.IsOpen():
-		lines := strings.Split(m.friends.View(), "\n")
-		overlayRows(rows, lines, max(0, (viewH-len(lines))/2), viewW)
+		m.drawPanel(pw, ph, m.friends.Lines())
 	case m.inv.IsOpen():
-		lines := strings.Split(m.inv.View(), "\n")
-		overlayRows(rows, lines, max(0, (viewH-len(lines))/2), viewW)
+		m.drawPanel(pw, ph, m.inv.Lines())
 	}
 	if m.chat.IsOpen() {
-		lines := strings.Split(m.chat.ViewInput(viewW), "\n")
-		overlayRows(rows, lines, max(0, viewH-len(lines)-1), viewW)
+		m.drawInputBar(pw, ph)
 	}
 
-	// Letterbox into the full terminal.
-	leftPad := (m.termW - viewW) / 2
-	topPad := (m.termH - viewH) / 2
-	bottomPad := m.termH - viewH - topPad
+	return m.frameString()
+}
 
+// frameString encodes the canvas to Sixel, prefixed with hide-cursor and a
+// home so the image lands at the top-left every frame.
+func (m *Model) frameString() string {
 	m.sb.Reset()
-	for i := 0; i < topPad; i++ {
-		m.sb.WriteByte('\n')
-	}
-	pad := strings.Repeat(" ", max(0, leftPad))
-	for y, row := range rows {
-		if y > 0 {
-			m.sb.WriteByte('\n')
-		}
-		m.sb.WriteString(pad)
-		m.sb.WriteString(row)
-	}
-	for i := 0; i < bottomPad; i++ {
-		m.sb.WriteByte('\n')
-	}
+	m.sb.WriteString("\x1b[?25l\x1b[H")
+	m.screen.EncodeSixel(m.sb, m.pal)
 	return m.sb.String()
 }
 
-// drawPlayers renders every avatar (remote and local) with name tags.
-func (m *Model) drawPlayers(ox, oy int, t float64) {
+// drawPlayers bakes every avatar (remote and local), painter-sorted by
+// isometric depth, with a name tag in the player's color above the head.
+func (m *Model) drawPlayers(originSx, originSy, t float64) {
 	states := make([]hub.PlayerState, 0, len(m.remotes)+1)
 	for _, st := range m.remotes {
 		states = append(states, st)
@@ -116,7 +130,12 @@ func (m *Model) drawPlayers(ox, oy int, t float64) {
 		Dir:    m.dir,
 		Moving: m.moving,
 	})
-	sort.Slice(states, func(i, j int) bool { return states[i].Pos.Y < states[j].Pos.Y })
+	// Depth = gx + gy; nearer (larger) drawn later so it overlaps.
+	sort.Slice(states, func(i, j int) bool {
+		di := float64(states[i].Pos.X) + float64(states[i].Pos.Y)/2
+		dj := float64(states[j].Pos.X) + float64(states[j].Pos.Y)/2
+		return di < dj
+	})
 
 	for _, st := range states {
 		frame := 0
@@ -127,26 +146,61 @@ func (m *Model) drawPlayers(ox, oy int, t float64) {
 				frame = int(t * 6)
 			}
 		}
-		spr := sprites.Player(sprites.Facing(st.Dir), frame)
-		// Feet at (Pos.X, Pos.Y) in (cell, pixel-row) space; the sprite is
-		// 3 cells wide and 8 pixel rows tall.
-		spr.Draw(m.screen, st.Pos.X-1-ox, st.Pos.Y-(sprites.PlayerH-1)-oy*2)
+		gx := float64(st.Pos.X)
+		gy := float64(st.Pos.Y) / 2
+		sx, sy := iso.Project(gx, gy)
+		footX := int(sx - originSx)
+		footY := int(sy-originSy) + iso.HH
+		sprites.Draw(m.screen, footX, footY, sprites.Facing(st.Dir), frame, st.Moving)
 
-		// Name tag one cell above the head, centered, in the player color.
-		headCell := (st.Pos.Y - (sprites.PlayerH - 1)) / 2
-		nameW := utf8.RuneCountInString(st.Info.Name)
-		m.screen.WriteText(st.Pos.X-nameW/2-ox, headCell-1-oy, st.Info.Name, halfblock.Hex(st.Info.Color))
+		nameW := canvas.TextWidth(st.Info.Name)
+		nameY := footY - sprites.Height - canvas.LineH
+		m.screen.DrawTextShadow(footX-nameW/2, nameY, st.Info.Name, canvas.Hex(st.Info.Color), 0x000000)
 	}
 }
 
-// drawHUD writes the hint line and the unread-DM indicator.
-func (m *Model) drawHUD(viewW, viewH int) {
+// applyLighting dims the plaza toward an ambient floor, then lights it from
+// the player and every nearby lamp (with organic flicker), finishing with
+// blocky glow halos at each source.
+func (m *Model) applyLighting(originSx, originSy, t float64, pw, ph int) {
+	const ambient = 0.5
+
+	// Player's carried light, anchored at the avatar's torso.
+	psx, psy := iso.Project(float64(m.px), float64(m.py)/2)
+	pfx := int(psx - originSx)
+	pfy := int(psy-originSy) + iso.HH - 14
+
+	lights := []light.Light{{X: pfx, Y: pfy, Radius: 82, Power: 0.75}}
+
+	type glowSpec struct {
+		x, y int
+		k    float64
+	}
+	var glows []glowSpec
+	for _, p := range m.world.Lamps {
+		hx, hy := plaza.LampHead(p.X, p.Y, originSx, originSy)
+		if hx < -120 || hx > pw+120 || hy < -120 || hy > ph+120 {
+			continue // off-screen lamp, skip
+		}
+		k := anim.Flicker(t, p.X*31+p.Y*7)
+		lights = append(lights, light.Light{X: hx, Y: hy, Radius: 96, Power: 0.6 * k})
+		glows = append(glows, glowSpec{hx, hy, k})
+	}
+
+	m.lights.Apply(m.screen, lights, ambient)
+
+	light.Glow(m.screen, pfx, pfy, 24, 0x9A9A9A)
+	for _, g := range glows {
+		light.Glow(m.screen, g.x, g.y, 34, canvas.RGB(255, 255, 255).Scale(0.7+0.3*g.k))
+	}
+}
+
+// drawHUD bakes the hint line (bottom-right) and the unread-DM badge.
+func (m *Model) drawHUD(pw, ph int) {
 	hint := "Enter chat · i inventory · f friends · q quit"
-	hw := utf8.RuneCountInString(hint)
-	m.screen.WriteText(viewW-hw-1, viewH-1, hint, 0x404040)
+	m.screen.DrawText(pw-canvas.TextWidth(hint)-6, ph-canvas.LineH-4, hint, 0x6E6E6E)
 
 	if len(m.unread) > 0 && !m.friends.IsOpen() {
-		// Show one name; summarize the rest.
 		var name string
 		for _, n := range m.unread {
 			name = n
@@ -156,37 +210,68 @@ func (m *Model) drawHUD(viewW, viewH int) {
 		if extra := len(m.unread) - 1; extra > 0 {
 			ind += " +" + itoa(extra)
 		}
-		iw := utf8.RuneCountInString(ind)
-		m.screen.WriteText(viewW-iw-1, 0, ind, 0xFFFFFF)
+		m.screen.DrawTextShadow(pw-canvas.TextWidth(ind)-6, 4, ind, 0xFFFFFF, 0x000000)
 	}
 }
 
-// overlayRows replaces full canvas rows with centered overlay lines.
-func overlayRows(rows []string, lines []string, startRow, viewW int) {
-	for i, line := range lines {
-		r := startRow + i
-		if r < 0 || r >= len(rows) {
-			continue
+// drawToast bakes the top-center notification banner as an inverse box.
+func (m *Model) drawToast(pw int) {
+	msg := m.toasts.Message()
+	if msg == "" {
+		return
+	}
+	w := canvas.TextWidth(msg) + 12
+	x := pw/2 - w/2
+	m.screen.FillRect(x, 4, w, canvas.LineH+6, 0xFFFFFF)
+	m.screen.DrawText(x+6, 7, msg, 0x000000)
+}
+
+// drawPanel bakes a centered modal box (inventory, friends) over a dimmed
+// scene.
+func (m *Model) drawPanel(pw, ph int, lines []string) {
+	// Dim the world behind the panel.
+	px := m.screen.Pixels()
+	for i := range px {
+		px[i] = px[i].Scale(0.35)
+	}
+
+	maxw := 0
+	for _, l := range lines {
+		if w := canvas.TextWidth(l); w > maxw {
+			maxw = w
 		}
-		w := lipgloss.Width(line)
-		left := max(0, (viewW-w)/2)
-		right := max(0, viewW-w-left)
-		rows[r] = strings.Repeat(" ", left) + line + strings.Repeat(" ", right)
+	}
+	const padX, padY = 8, 8
+	bw := maxw + padX*2
+	bh := len(lines)*canvas.LineH + padY*2
+	x := pw/2 - bw/2
+	y := ph/2 - bh/2
+	m.screen.FillRect(x, y, bw, bh, 0x0A0A0A)
+	m.screen.Rect(x, y, bw, bh, 0xD4D4D4)
+	ty := y + padY
+	for i, l := range lines {
+		col := canvas.Color(0xD4D4D4)
+		if i == 0 {
+			col = 0xFFFFFF // title
+		}
+		m.screen.DrawText(x+padX, ty, l, col)
+		ty += canvas.LineH
 	}
 }
 
-// clamp bounds v to [lo, hi]; if hi < lo it returns lo.
-func clamp(v, lo, hi int) int {
-	if hi < lo {
-		return lo
+// drawInputBar bakes the chat input near the bottom with a solid caret.
+func (m *Model) drawInputBar(pw, ph int) {
+	line := m.chat.InputLine()
+	bw := pw * 2 / 3
+	if bw > pw-8 {
+		bw = pw - 8
 	}
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+	x := (pw - bw) / 2
+	y := ph - canvas.LineH - 16
+	m.screen.FillRect(x, y, bw, canvas.LineH+8, 0x101010)
+	m.screen.Rect(x, y, bw, canvas.LineH+8, 0xA1A1A1)
+	tx := m.screen.DrawText(x+6, y+4, line, 0xFFFFFF)
+	m.screen.FillRect(tx, y+4, 2, canvas.GlyphH, 0xFFFFFF) // caret
 }
 
 // itoa is a tiny positive-int formatter to keep fmt out of the frame path.

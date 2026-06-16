@@ -91,6 +91,17 @@ func (m *Model) Open() tea.Cmd {
 	return textinput.Blink
 }
 
+// OpenWith reveals the input bar pre-filled with text and the cursor at the
+// end — used to seed a /w command when the player picks someone in the
+// friends panel.
+func (m *Model) OpenWith(text string) tea.Cmd {
+	m.open = true
+	m.input.SetValue(text)
+	m.input.CursorEnd()
+	m.input.Focus()
+	return textinput.Blink
+}
+
 // Close hides the input bar without sending.
 func (m *Model) Close() {
 	m.open = false

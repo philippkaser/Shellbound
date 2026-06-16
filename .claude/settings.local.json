@@ -3,7 +3,9 @@
     "allow": [
       "Bash(sed 's|/tmp/layout.txt|layout_gen.txt|' /tmp/genmap.py)",
       "Bash(python genmap.py)",
-      "Read(//c/c/Users/philipp.kaser/OneDrive - Durst Group AG/Documents/ai benchmark/Shellbound/**)"
+      "Read(//c/c/Users/philipp.kaser/OneDrive - Durst Group AG/Documents/ai benchmark/Shellbound/**)",
+      "Bash(go env *)",
+      "Bash(grep -rl \"func.*CursorEnd\" \"$\\(go env GOMODCACHE\\)/github.com/charmbracelet/\")"
     ]
   }
 }

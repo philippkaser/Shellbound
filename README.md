@@ -48,12 +48,18 @@ terminals do) and ideally use a dark/black background.
 | WASD / arrows  | Walk (hold two for diagonals)           |
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
 | `i`            | Inventory                               |
-| `f`            | Friends & messages                      |
+| `f`            | Friends list (Enter to message someone) |
 | `Esc`          | Close any panel                         |
 | `q` / `Ctrl+C` | Disconnect                              |
 
 Chat commands: `/help`, `/who`, `/w <user> <msg>`, `/friend add|remove|list`,
 `/me <action>`, `/quit`.
+
+Direct messages are sent and read in the chat console: `/w <user> <msg>`
+whispers someone (delivered live if they're online, saved otherwise), and
+`/w <user>` on its own prints your recent thread with them. The friends
+panel (`f`) is an index of friends and people you've messaged — pressing
+Enter on a name pre-fills a `/w` to them.
 
 ## Design notes
 

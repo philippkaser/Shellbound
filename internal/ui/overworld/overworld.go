@@ -134,19 +134,9 @@ func New(
 		start:   time.Now(),
 		sb:      &strings.Builder{},
 	}
-	m.friends = friends.New(theme, repos, player, m.sendDM)
+	m.friends = friends.New(theme, repos, player)
 	m.chat.AddSystem("welcome to shellbound — /help for commands")
 	return m
-}
-
-// sendDM persists an outgoing DM and delivers it live when possible. Used
-// by both the friends panel and /w.
-func (m Model) sendDM(to storage.Player, text string) error {
-	if err := m.repos.DMs.Save(m.player.ID, to.ID, text); err != nil {
-		return err
-	}
-	m.handle.Whisper(to.ID, text)
-	return nil
 }
 
 // Init implements tea.Model.
@@ -201,14 +191,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	// Forward everything else (e.g. cursor blinks) to whichever input is
-	// active.
+	// Forward everything else (e.g. cursor blinks) to the chat input — the
+	// only live text field; the friends panel is keyboard-driven only.
 	if m.chat.IsOpen() {
 		cmd, _ := m.chat.Update(msg)
 		return m, cmd
-	}
-	if m.friends.IsOpen() {
-		return m, m.friends.Update(msg)
 	}
 	return m, nil
 }
@@ -230,7 +217,7 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	if m.friends.IsOpen() {
-		return m, m.friends.Update(key)
+		return m.updateFriends(key)
 	}
 
 	if m.inv.IsOpen() {
@@ -264,6 +251,16 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// updateFriends routes a key to the friends panel, then turns a row
+// selection into a /w command pre-filled in the chat console.
+func (m Model) updateFriends(msg tea.Msg) (Model, tea.Cmd) {
+	cmd := m.friends.Update(msg)
+	if target, ok := m.friends.TakeSelected(); ok {
+		return m, tea.Batch(cmd, m.chat.OpenWith("/w "+target.Username+" "))
+	}
+	return m, cmd
 }
 
 // normalizeKey folds WASD onto the arrow names so the held-key map has one
@@ -389,10 +386,10 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 		m.chat.Add(chat.Entry{Kind: kind, Name: ev.From.Name, Color: ev.From.Color, Text: ev.Text})
 
 	case hub.EvWhisper:
+		// Whispers land in the chat console; the HUD badge nudges the player
+		// if they're busy in a panel or the message scrolls off.
 		m.chat.Add(chat.Entry{Kind: chat.KindWhisperIn, Name: ev.From.Name, Color: ev.From.Color, Text: ev.Text})
-		if !m.friends.NotifyIncoming(ev.From.ID, ev.Text) {
-			m.unread[ev.From.ID] = ev.From.Name
-		}
+		m.unread[ev.From.ID] = ev.From.Name
 
 	case hub.EvKick:
 		return m, func() tea.Msg { return DisconnectMsg{Reason: ev.Reason} }

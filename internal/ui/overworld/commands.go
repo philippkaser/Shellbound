@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/ui/chat"
 )
 
@@ -30,6 +31,7 @@ func (m Model) runCommand(c chat.Command) (Model, tea.Cmd) {
 			"/help — this list",
 			"/who — who's online",
 			"/w <user> <msg> — whisper (also /whisper)",
+			"/w <user> — show recent messages with them",
 			"/friend add|remove|list <user>",
 			"/me <action> — emote",
 			"/quit — disconnect",
@@ -68,13 +70,14 @@ func (m Model) runCommand(c chat.Command) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// cmdWhisper implements /w <user> <message...>.
+// cmdWhisper implements /w <user> [<message...>]. With a message it sends a
+// DM; with just a name it prints the recent thread into the console.
 func (m Model) cmdWhisper(c chat.Command) (Model, tea.Cmd) {
-	if len(c.Args) < 2 {
-		m.chat.AddSystem("usage: /w <user> <message>")
+	if len(c.Args) == 0 {
+		m.chat.AddSystem("usage: /w <user> <message>  ·  /w <user> reads recent messages")
 		return m, nil
 	}
-	name, text := c.Args[0], c.ArgsFrom(1)
+	name := c.Args[0]
 	target, err := m.repos.Players.ByUsername(name)
 	if err != nil || target == nil {
 		m.chat.AddSystem("no such player: " + name)
@@ -84,6 +87,10 @@ func (m Model) cmdWhisper(c chat.Command) (Model, tea.Cmd) {
 		m.chat.AddSystem("talking to yourself is free, no whisper needed")
 		return m, nil
 	}
+	if len(c.Args) == 1 {
+		return m.showConversation(*target)
+	}
+	text := c.ArgsFrom(1)
 	if err := m.repos.DMs.Save(m.player.ID, target.ID, text); err != nil {
 		m.chat.AddSystem("could not send the message")
 		return m, nil
@@ -91,8 +98,33 @@ func (m Model) cmdWhisper(c chat.Command) (Model, tea.Cmd) {
 	delivered := m.handle.Whisper(target.ID, text)
 	m.chat.Add(chat.Entry{Kind: chat.KindWhisperOut, Name: target.Username, Color: target.Color, Text: text})
 	if !delivered {
-		m.chat.AddSystem(target.Username + " is offline — they'll find it in their messages")
+		m.chat.AddSystem(target.Username + " is offline — the message is saved for them")
 	}
+	return m, nil
+}
+
+// showConversation replays the recent DM thread with target into the chat
+// console as whisper lines, newest last. It clears any unread badge for
+// that player since the messages are now on screen.
+func (m Model) showConversation(target storage.Player) (Model, tea.Cmd) {
+	msgs, err := m.repos.DMs.Conversation(m.player.ID, target.ID, 10)
+	if err != nil {
+		m.chat.AddSystem("could not load messages with " + target.Username)
+		return m, nil
+	}
+	if len(msgs) == 0 {
+		m.chat.AddSystem("no messages with " + target.Username + " yet — /w " + target.Username + " <message>")
+		return m, nil
+	}
+	m.chat.AddSystem("— recent with " + target.Username + " —")
+	for _, dm := range msgs {
+		kind := chat.KindWhisperIn
+		if dm.SenderID == m.player.ID {
+			kind = chat.KindWhisperOut
+		}
+		m.chat.Add(chat.Entry{Kind: kind, Name: target.Username, Color: target.Color, Text: dm.Body})
+	}
+	delete(m.unread, target.ID)
 	return m, nil
 }
 

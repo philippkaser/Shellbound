@@ -6,7 +6,7 @@ import (
 )
 
 func TestPaletteGrayRamp(t *testing.T) {
-	p := NewPalette(64, 32, nil)
+	p := NewPalette(64, nil)
 	if got := p.Index(Black); got != 0 {
 		t.Errorf("black -> index %d, want 0", got)
 	}
@@ -22,7 +22,7 @@ func TestPaletteGrayRamp(t *testing.T) {
 
 func TestPaletteNearestColor(t *testing.T) {
 	pink := Hex("#FF5FAF")
-	p := NewPalette(64, 32, []Color{pink})
+	p := NewPalette(64, []Color{pink})
 	idx := p.Index(pink)
 	rgb := p.RGB()[idx]
 	if rgb.R != pink.R() || rgb.G != pink.G() || rgb.B != pink.B() {
@@ -51,7 +51,7 @@ func TestEncodeSixelNonEmpty(t *testing.T) {
 	c := New(8, 8)
 	c.Clear(Black)
 	c.FillRect(2, 2, 4, 4, RGB(255, 255, 255))
-	p := NewPalette(64, 32, nil)
+	p := NewPalette(64, nil)
 	var sb strings.Builder
 	c.EncodeSixel(&sb, p)
 	out := sb.String()

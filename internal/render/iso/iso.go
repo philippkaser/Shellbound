@@ -10,11 +10,10 @@ import "github.com/shellbound/shellbound/internal/render/canvas"
 
 // Tile dimensions in pixels. A 2:1 diamond (TileW == 2*TileH) is the classic
 // isometric footprint. Half-extents are the common case in the math below.
-// These set the camera's apparent zoom: larger tiles bring the world closer
-// (fewer tiles fill the bounded viewport, so the avatar reads clearly).
+// Larger tiles pull the camera closer so avatars read clearly.
 const (
-	TileW = 56
-	TileH = 28
+	TileW = 48
+	TileH = 24
 	HW    = TileW / 2
 	HH    = TileH / 2
 )

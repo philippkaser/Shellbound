@@ -153,20 +153,24 @@ func (m *Model) ViewInput(totalWidth int) string {
 	return m.theme.InputBar.Width(w).Render(m.input.View())
 }
 
-// RenderHistory bakes up to maxVisible non-expired lines into the canvas,
+// History returns the in-memory chat entries. Callers that hold the slice
+// across goroutines should copy it first.
+func (m *Model) History() []Entry { return m.entries }
+
+// RenderEntries bakes up to maxVisible non-expired lines into the canvas,
 // bottom-anchored so the baseline of the newest line sits at pixel (x,
 // yBottom) and older lines stack upward, clipped to maxWPx pixels wide. Fresh
 // lines are white with the sender's colored name (a sanctioned color pop);
 // lines older than fadeAfter dim to grey; lines older than dropAfter vanish.
-func (m *Model) RenderHistory(c *canvas.Canvas, now time.Time, x, yBottom, maxWPx int) {
+func RenderEntries(c *canvas.Canvas, entries []Entry, now time.Time, x, yBottom, maxWPx int) {
 	maxW := maxWPx / canvas.AdvanceX
 	if maxW < 8 {
 		return
 	}
 	y := yBottom
 	drawn := 0
-	for i := len(m.entries) - 1; i >= 0 && drawn < maxVisible && y >= 0; i-- {
-		e := m.entries[i]
+	for i := len(entries) - 1; i >= 0 && drawn < maxVisible && y >= 0; i-- {
+		e := entries[i]
 		age := now.Sub(e.At)
 		if age >= dropAfter {
 			break // older entries are older still

@@ -7,8 +7,7 @@ import (
 
 func encode(pix []byte, w, h int, pal []RGB) string {
 	var sb strings.Builder
-	var e Encoder
-	e.Encode(&sb, pix, w, h, pal)
+	Encode(&sb, pix, w, h, pal)
 	return sb.String()
 }
 

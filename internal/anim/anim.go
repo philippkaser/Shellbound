@@ -29,30 +29,10 @@ func NewCamera(x, y float64) *Camera {
 	}
 }
 
-// Update advances the spring one fixed tick toward the target.
+// Update advances the spring one tick toward the target.
 func (c *Camera) Update(targetX, targetY float64) {
 	c.X, c.vx = c.spring.Update(c.X, c.vx, targetX)
 	c.Y, c.vy = c.spring.Update(c.Y, c.vy, targetY)
-}
-
-// Advance steps the spring toward the target by dt seconds of real time,
-// regardless of how often it is called. The spring is tuned in fixed 1/30 s
-// steps, so this runs the right number of them — keeping the camera's follow
-// speed identical whether frames arrive at 10 or 20 Hz. The step count is
-// capped so a long pause (a stalled frame, a backgrounded tab) can't snap the
-// camera across the map on the next tick.
-func (c *Camera) Advance(targetX, targetY, dt float64) {
-	steps := int(dt*30 + 0.5)
-	if steps < 1 {
-		steps = 1
-	}
-	if steps > 6 {
-		steps = 6
-	}
-	for i := 0; i < steps; i++ {
-		c.X, c.vx = c.spring.Update(c.X, c.vx, targetX)
-		c.Y, c.vy = c.spring.Update(c.Y, c.vy, targetY)
-	}
 }
 
 // Snap teleports the camera to (x, y) and kills velocity. Used on join and

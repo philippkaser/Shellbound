@@ -20,7 +20,6 @@ import (
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/world"
 	"github.com/shellbound/shellbound/internal/worlds/comingsoon"
-	"github.com/shellbound/shellbound/internal/worlds/starfall"
 )
 
 // envOr returns the environment variable or a default.
@@ -50,15 +49,12 @@ func main() {
 	repos := storage.NewRepos(db)
 	log.Info("database ready", "path", dbPath)
 
-	// Register a world for every portal key the plaza declares: Starfall is the
-	// first real one; the rest still get the "coming soon" placeholder.
+	// Register the placeholder world under every portal key declared by the
+	// plaza. Shipping a real mini-game later means registering it here
+	// instead — nothing else changes.
 	registry := world.NewRegistry()
 	for _, p := range plaza.Portals {
-		var w world.World = comingsoon.New(p.Key, p.Name)
-		if p.Key == "starfall" {
-			w = starfall.New()
-		}
-		if err := registry.Register(w); err != nil {
+		if err := registry.Register(comingsoon.New(p.Key, p.Name)); err != nil {
 			log.Fatal("register world", "key", p.Key, "err", err)
 		}
 	}

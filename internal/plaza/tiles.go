@@ -1,6 +1,7 @@
 package plaza
 
 import (
+	"math"
 	"sort"
 
 	"github.com/shellbound/shellbound/internal/anim"
@@ -23,13 +24,13 @@ const (
 	toneShadow    = canvas.Color(0x2A2A2A)
 )
 
-// Structure heights in pixels (scaled to the isometric tile size).
+// Structure heights in pixels (scaled to the larger tiles).
 const (
-	wallH    = 24
-	pillarH  = 38
-	benchH   = 9
-	statueH  = 34
-	lampPost = 34
+	wallH    = 22
+	pillarH  = 34
+	benchH   = 8
+	statueH  = 30
+	lampPost = 32
 )
 
 // project converts a cell to its ground-diamond top vertex in canvas pixels,
@@ -44,7 +45,7 @@ func project(gx, gy int, originSx, originSy float64) (int, int) {
 // screen-space point at the canvas's top-left; t is seconds since server
 // start (drives water ripple and statue spray).
 func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
-	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 4)
+	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 3)
 	gx0, gy0 = clampi(gx0, 0, m.W-1), clampi(gy0, 0, m.H-1)
 	gx1, gy1 = clampi(gx1, 0, m.W-1), clampi(gy1, 0, m.H-1)
 
@@ -96,7 +97,8 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		}
 	}
 
-	// Statue spray crest, flickering above each fountain statue.
+	// Fountain spray: a flickering crest above each statue, plus droplets
+	// arcing up and falling back under gravity.
 	for _, p := range m.StatueTops {
 		if p.X < gx0 || p.X > gx1 || p.Y < gy0 || p.Y > gy1 {
 			continue
@@ -105,8 +107,19 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		ph := anim.Phase(t, 4, 3, p.X)
 		crest := []canvas.Color{toneMid, toneLight, toneMid}[ph]
 		topY := py - statueH
-		c.FillCircle(px, topY-4, 2, crest)
-		c.Set(px, topY-7, toneLight)
+		c.FillCircle(px, topY-5, 2, crest)
+		c.Set(px, topY-9, toneLight)
+		for d := 0; d < 6; d++ {
+			fd := float64(d)
+			prog := math.Mod(t*1.4+fd*0.37, 1.0) // 0..1 life of a droplet
+			dir := 1.0
+			if d%2 == 0 {
+				dir = -1.0
+			}
+			dx := int(dir * prog * (4 + fd))
+			dy := int(-22*prog + 26*prog*prog) // up then accelerating down
+			c.Set(px+dx, topY-8+dy, toneLight)
+		}
 	}
 }
 
@@ -124,8 +137,8 @@ func (m *Map) drawWater(c *canvas.Canvas, px, py, gx, gy int, t float64) {
 func (m *Map) drawLampPost(c *canvas.Canvas, px, py int) {
 	cx := px
 	baseY := py + iso.HH
-	c.FillRect(cx-1, baseY-lampPost, 3, lampPost, toneDim)
-	c.FillCircle(cx, baseY-lampPost, 3, toneWhite)
+	c.FillRect(cx-1, baseY-lampPost, 2, lampPost, toneDim)
+	c.FillCircle(cx, baseY-lampPost, 2, toneWhite)
 }
 
 // LampHead returns the canvas pixel of a lamp's glowing head for a cell,

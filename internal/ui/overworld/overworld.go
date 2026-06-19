@@ -1,20 +1,21 @@
 // Package overworld is the heart of the client experience: the plaza
 // renderer, movement and input handling, multiplayer presence, chat and
 // the panel overlays. One Model exists per SSH session.
+//
+// Rendering is decoupled: the Model runs game logic and, whenever state
+// changes, publishes a cheap snapshot to a background Renderer (renderer.go)
+// that produces smooth, interpolated Sixel frames on its own clock. The heavy
+// encode therefore never blocks bubbletea's input loop.
 package overworld
 
 import (
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
-	"github.com/shellbound/shellbound/internal/render/light"
-	"github.com/shellbound/shellbound/internal/render/shimmer"
 	"github.com/shellbound/shellbound/internal/render/syncwriter"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
@@ -24,15 +25,13 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
-// Tick rates: ambient animation at 10 FPS; movement stepping at 20 Hz
-// while keys are held. The hub broadcasts at 20 Hz on its own clock.
+// Tick rates. Movement steps are paced for a calm, continuous walk; the held
+// window is wide enough to bridge the terminal's key-repeat delay so a held
+// key never stutters into stop-start motion.
 const (
 	animTickEvery = 100 * time.Millisecond
-	moveTickEvery = 70 * time.Millisecond
-	// heldWindow bridges the gap between key-autorepeat events so walking
-	// stays continuous, but is kept short so releasing a key doesn't coast
-	// the avatar for long (the "movement boost" feel).
-	heldWindow = 180 * time.Millisecond
+	moveTickEvery = 90 * time.Millisecond
+	heldWindow    = 340 * time.Millisecond
 )
 
 // Minimum playable terminal size.
@@ -59,10 +58,6 @@ type moveTickMsg time.Time
 type hubEventMsg struct{ ev hub.Event }
 type hubClosedMsg struct{}
 
-// frameDoneMsg is returned after a Sixel frame has been written to the
-// session; it carries no state and exists only to complete the render Cmd.
-type frameDoneMsg struct{}
-
 // Env carries the per-session rendering collaborators the server builds once
 // and hands to every overworld: the shared Sixel palette, the synchronized
 // session writer, and the probed terminal cell size in pixels.
@@ -80,14 +75,7 @@ type Model struct {
 	player storage.Player
 	handle *hub.Handle
 
-	// Rendering: full frames are baked into a pixel canvas and shipped as one
-	// Sixel image straight to the session. active gates whether this model
-	// currently owns the screen (false while a portal world is on top).
-	pal          *canvas.Palette
-	out          *syncwriter.Writer
-	cellW, cellH int
-	active       bool
-	inFlight     bool // a frame is being encoded/written; gate the next one
+	renderer *Renderer
 
 	// Local avatar: feet position as (cell column, half-block pixel row).
 	px, py    int
@@ -96,10 +84,8 @@ type Model struct {
 	walkCount int
 	onPortal  bool
 
-	cam        *anim.Camera
-	held       map[string]time.Time
-	ticking    bool // a moveTick chain is live
-	diagToggle bool // alternates the moved axis on diagonals (uniform speed)
+	held    map[string]time.Time
+	ticking bool // a moveTick chain is live
 
 	remotes map[int64]hub.PlayerState
 
@@ -109,19 +95,13 @@ type Model struct {
 	toasts  toast.Model
 	unread  map[int64]string // player id -> username with unseen DMs
 
-	field   *shimmer.Field
-	lights  *light.Field
-	start   time.Time
-	lastCam time.Time // wall clock of the last camera advance
-
 	termW, termH int
-	screen       *canvas.Canvas
-	sb           *strings.Builder
 }
 
 // New creates the overworld for a logged-in player. env carries the shared
 // Sixel palette, the session writer and the terminal cell size. The model
-// joins the hub immediately; snapshot seeds the remote player set.
+// joins the hub immediately; snapshot seeds the remote player set and the
+// background renderer starts at once.
 func New(
 	theme style.Theme,
 	plazaMap *plaza.Map,
@@ -141,33 +121,25 @@ func New(
 		}
 	}
 
+	r := NewRenderer(env, plazaMap)
+	r.Start()
+
 	m := Model{
-		theme:   theme,
-		world:   plazaMap,
-		pal:     env.Pal,
-		out:     env.Out,
-		cellW:   env.CellW,
-		cellH:   env.CellH,
-		active:  true,
-		repos:   repos,
-		player:  player,
-		handle:  handle,
-		px:      px,
-		py:      py,
-		dir:     hub.DirDown,
-		cam:     anim.NewCamera(float64(px), float64(py)/2),
-		held:    make(map[string]time.Time),
-		remotes: remotes,
-		chat:    chat.New(theme),
-		inv:     inventory.New(theme),
-		toasts:  toast.New(theme),
-		unread:  make(map[int64]string),
-		field:   shimmer.NewField(),
-		lights:  light.NewField(),
-		start:   time.Now(),
-		lastCam: time.Now(),
-		screen:  canvas.New(1, 1),
-		sb:      &strings.Builder{},
+		theme:    theme,
+		world:    plazaMap,
+		renderer: r,
+		repos:    repos,
+		player:   player,
+		handle:   handle,
+		px:       px,
+		py:       py,
+		dir:      hub.DirDown,
+		held:     make(map[string]time.Time),
+		remotes:  remotes,
+		chat:     chat.New(theme),
+		inv:      inventory.New(theme),
+		toasts:   toast.New(theme),
+		unread:   make(map[int64]string),
 	}
 	m.friends = friends.New(theme, repos, player)
 	m.chat.AddSystem("welcome to shellbound — /help for commands")
@@ -175,12 +147,65 @@ func New(
 }
 
 // SetActive marks whether the overworld currently owns the screen. While a
-// portal world is on top it is inactive and emits no frames. Toggling clears
-// the in-flight gate so the next owner can repaint immediately.
+// portal world is on top it is inactive and the renderer emits no frames.
 func (m Model) SetActive(b bool) Model {
-	m.active = b
-	m.inFlight = false
+	m.renderer.SetActive(b)
 	return m
+}
+
+// StopRenderer halts the background render goroutine; the session app wires
+// this into teardown so the goroutine never outlives the session.
+func (m Model) StopRenderer() { m.renderer.Stop() }
+
+// publish hands the renderer a fresh, immutable snapshot of everything it
+// draws. Cheap enough to call on every state change.
+func (m *Model) publish() {
+	players := make([]playerSnapshot, 0, len(m.remotes)+1)
+	for _, st := range m.remotes {
+		players = append(players, playerSnapshot{
+			id: st.Info.ID, name: st.Info.Name, color: st.Info.Color,
+			x: st.Pos.X, y: st.Pos.Y, dir: st.Dir, moving: st.Moving,
+		})
+	}
+	players = append(players, playerSnapshot{
+		id: m.player.ID, name: m.player.Username, color: m.player.Color,
+		x: m.px, y: m.py, dir: m.dir, moving: m.moving,
+	})
+
+	var panel []string
+	switch {
+	case m.friends.IsOpen():
+		panel = m.friends.Lines()
+	case m.inv.IsOpen():
+		panel = m.inv.Lines()
+	}
+
+	var unreadName string
+	var unreadN int
+	if len(m.unread) > 0 && !m.friends.IsOpen() {
+		for _, n := range m.unread {
+			unreadName = n
+			break
+		}
+		unreadN = len(m.unread) - 1
+	}
+
+	chatInput := ""
+	if m.chat.IsOpen() {
+		chatInput = m.chat.InputLine()
+	}
+
+	m.renderer.Submit(frameSnapshot{
+		termW: m.termW, termH: m.termH,
+		players: players, selfID: m.player.ID,
+		chat:       append([]chat.Entry(nil), m.chat.History()...),
+		toast:      m.toasts.Message(),
+		panelLines: panel,
+		chatInput:  chatInput,
+		chatOpen:   m.chat.IsOpen(),
+		unreadName: unreadName,
+		unreadN:    unreadN,
+	})
 }
 
 // Init implements tea.Model.
@@ -212,40 +237,31 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termW, m.termH = msg.Width, msg.Height
-		// Don't touch inFlight here: a frame mid-encode is still reading the
-		// canvas on another goroutine. maybeRender no-ops if one is in flight;
-		// the next tick repaints at the new size once it completes.
-		next, rcmd := m.maybeRender()
-		// Clear so a stale, differently-centered image leaves no remnants.
-		return next, tea.Batch(tea.ClearScreen, rcmd)
+		m.publish()
+		return m, nil
 
 	case animTickMsg:
-		now := time.Time(msg)
-		m.toasts.Tick(now)
-		m = m.advanceCam(now)
-		next, rcmd := m.maybeRender()
-		return next, tea.Batch(animTick(), rcmd)
+		m.toasts.Tick(time.Time(msg))
+		m.publish()
+		return m, animTick()
 
 	case moveTickMsg:
-		now := time.Time(msg)
 		next, cmd := m.stepMovement()
-		next = next.advanceCam(now)
-		next, rcmd := next.maybeRender()
-		return next, tea.Batch(cmd, rcmd)
-
-	case frameDoneMsg:
-		m.inFlight = false
-		return m, nil
+		next.publish()
+		return next, cmd
 
 	case hubEventMsg:
 		next, cmd := m.applyEvent(msg.ev)
+		next.publish()
 		return next, tea.Batch(cmd, listenHub(next.handle.Events()))
 
 	case hubClosedMsg:
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "connection closed"} }
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		next, cmd := m.handleKey(msg)
+		next.publish()
+		return next, cmd
 	}
 
 	// Forward everything else (e.g. cursor blinks) to the chat input — the
@@ -368,8 +384,17 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Face the direction of effort (from the full intent, before the diagonal
-	// normalization below, so the sprite doesn't flip facing every tick).
+	moved := false
+	if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
+		m.px += dx
+		moved = true
+	}
+	if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
+		m.py += dy
+		moved = true
+	}
+
+	// Face the direction of effort even when blocked.
 	switch {
 	case dx < 0:
 		m.dir = hub.DirLeft
@@ -379,31 +404,6 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 		m.dir = hub.DirUp
 	case dy > 0:
 		m.dir = hub.DirDown
-	}
-
-	// Keep diagonal speed equal to cardinal: advance only one axis per step,
-	// alternating, so a diagonal walk is a same-pace staircase rather than a
-	// sqrt(2) sprint.
-	if dx != 0 && dy != 0 {
-		if m.diagToggle {
-			dy = 0
-		} else {
-			dx = 0
-		}
-		m.diagToggle = !m.diagToggle
-	}
-
-	// Both axes advance one whole cell per step. py is in half-cell rows (a
-	// half-block-era unit), so a vertical step is ±2 — without this the avatar
-	// drifted vertically at half the horizontal speed.
-	moved := false
-	if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
-		m.px += dx
-		moved = true
-	}
-	if dy != 0 && !m.world.Blocked(m.px, m.py/2+dy) {
-		m.py += 2 * dy
-		moved = true
 	}
 
 	if moved {
@@ -469,49 +469,12 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// ResumeFromWorld is called by the session app when the player exits a
-// portal world: it re-snaps the camera, re-arms rendering and refreshes
+// ResumeFromWorld is called by the session app when the player exits a portal
+// world: it re-arms rendering (re-priming interpolation) and refreshes
 // presence-dependent UI.
 func (m Model) ResumeFromWorld() Model {
-	m.cam.Snap(float64(m.px), float64(m.py)/2)
-	m.active = true
-	m.inFlight = false
+	m.renderer.SetActive(true)
 	return m
-}
-
-// advanceCam steps the follow-camera toward the player by the real time
-// elapsed since the last advance, so the follow speed is independent of how
-// often (10–20 Hz) ticks actually fire.
-func (m Model) advanceCam(now time.Time) Model {
-	dt := now.Sub(m.lastCam).Seconds()
-	if dt <= 0 {
-		dt = 1.0 / 30
-	}
-	m.lastCam = now
-	m.cam.Advance(float64(m.px), float64(m.py)/2, dt)
-	return m
-}
-
-// maybeRender draws the next frame on the update goroutine (cheap) and ships
-// the heavy Sixel encode + session write off-thread. At most one frame is ever
-// in flight, so output paces itself to the SSH write speed: frames never pile
-// up into lag spikes, and the encode never blocks input handling. Returns a
-// nil Cmd (a no-op for tea.Batch) when a frame is already in flight or the
-// overworld doesn't currently own the screen.
-func (m Model) maybeRender() (Model, tea.Cmd) {
-	if !m.active || m.inFlight || m.out == nil || m.termW <= 0 || m.termH <= 0 {
-		return m, nil
-	}
-	prefix := m.drawScene()
-	m.inFlight = true
-	screen, sb, pal, out := m.screen, m.sb, m.pal, m.out
-	return m, func() tea.Msg {
-		sb.Reset()
-		sb.WriteString(prefix)
-		screen.EncodeSixel(sb, pal)
-		_, _ = out.WriteString(sb.String())
-		return frameDoneMsg{}
-	}
 }
 
 // Player returns the logged-in player this overworld belongs to.

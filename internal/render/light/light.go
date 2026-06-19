@@ -104,36 +104,6 @@ func Glow(c *canvas.Canvas, cx, cy int, r float64, core canvas.Color) {
 	}
 }
 
-// Vignette darkens the frame toward its corners by up to `strength` (0..1),
-// drawing the eye to the center for a cinematic feel. Applied to every pixel,
-// so it gently fades the world edges without touching the centered action.
-func Vignette(c *canvas.Canvas, strength float64) {
-	if strength <= 0 {
-		return
-	}
-	w, h := c.W, c.H
-	cx, cy := float64(w)/2, float64(h)/2
-	maxd2 := cx*cx + cy*cy
-	if maxd2 <= 0 {
-		return
-	}
-	px := c.Pixels()
-	for y := 0; y < h; y++ {
-		dy := float64(y) - cy
-		row := y * w
-		for x := 0; x < w; x++ {
-			dx := float64(x) - cx
-			f := 1 - strength*((dx*dx+dy*dy)/maxd2)
-			if f < 1 {
-				if f < 0 {
-					f = 0
-				}
-				px[row+x] = px[row+x].Scale(f)
-			}
-		}
-	}
-}
-
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo

@@ -102,6 +102,9 @@ func (a *app) join(player storage.Player) {
 	a.over = overworld.New(a.theme, a.deps.plazaMap, a.deps.env, a.deps.repos, player, handle, snapshot)
 	a.joined = true
 	a.state = statePlaza
+	// Ensure the overworld's background render goroutine is stopped with the
+	// session (the renderer pointer is stable across model copies).
+	a.deps.onTeardown(a.over.StopRenderer)
 }
 
 // listenInternal waits for the next internal message; the done channel
@@ -260,13 +263,7 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 		Player:    player,
 		Save:      world.NewSaveStore(a.deps.repos.Saves, player.ID, w.Key()),
 		Inventory: world.NewInventoryAPI(a.deps.repos.Inventory, player.ID, w.Key()),
-		Screen: world.Screen{
-			Pal:   a.deps.env.Pal,
-			Out:   a.deps.env.Out,
-			CellW: a.deps.env.CellW,
-			CellH: a.deps.env.CellH,
-		},
-		Exit: exit,
+		Exit:      exit,
 	}
 	a.worldModel = w.Init(ctx)
 	a.state = stateWorld

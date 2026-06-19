@@ -33,7 +33,7 @@ Configuration is via environment variables:
 | `SHELLBOUND_DB`      | `./shellbound.db`             | SQLite database file   |
 | `SHELLBOUND_HOSTKEY` | `./.ssh/shellbound_ed25519`   | Host key (auto-created)|
 | `SHELLBOUND_SIXEL`   | `on`                          | Set `off` to serve a "use a Sixel terminal" notice instead of graphics |
-| `SHELLBOUND_CELL`    | `8x16`                        | Your client's cell size in pixels (`WxH`) — sets where the image is centered; lower it if the image scrolls. The world view itself is pixel-capped (same for everyone). |
+| `SHELLBOUND_CELL`    | _(from PTY)_                  | Override the terminal cell size in pixels (`WxH`). Normally auto-detected from the client's PTY; set this only if your client doesn't report pixel dimensions and the image is mis-centered or scrolls. |
 
 Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 
@@ -100,17 +100,19 @@ Enter on a name pre-fills a `/w` to them.
   Connecting the same key twice hands the avatar to the newest session.
 - **Worlds.** Portals reference `world.World` implementations from a
   registry. A world receives a `Context` carrying save/inventory APIs
-  pre-bound to `(player, world key)` — it cannot touch any other slot. In
-  1.0 all three portals lead to the "coming soon" placeholder, which
-  persists a visit counter through the real save pipeline.
+  pre-bound to `(player, world key)` — it cannot touch any other slot — plus a
+  `Screen` (palette, session writer, cell size) so it can ship Sixel frames
+  through the same pipeline as the plaza. The first portal, **Starfall**, is a
+  full pixel mini-game (catch falling stars; best score persists); the other
+  two are still the "coming soon" placeholder.
 - **Persistence.** Pure-Go SQLite, single writer connection, in-code
   migrations on startup. Tables: `players`, `friends`, `dms`, `inventory`,
   `saves`.
 
 ## Roadmap
 
-- **1.x** — first real portal world (Bomberman), item grants on victory,
-  inventory that actually fills up.
+- **1.x** — Starfall grants items on a high score, inventory that actually
+  fills up, more portal worlds.
 - **Later** — Chess (with correspondence via DMs?), the Doom portal doing
   whatever a terminal can get away with, player-placed decorations,
   moderation tools.
@@ -123,11 +125,11 @@ internal/server/     wish server, session app shell
 internal/hub/        presence + broadcast
 internal/auth/       fingerprints, username rules
 internal/storage/    sqlite, migrations, repositories
-internal/world/      World interface, registry, scoped stores
-internal/worlds/     world implementations (comingsoon)
+internal/world/      World interface, registry, scoped stores, render Screen
+internal/worlds/     world implementations (starfall, comingsoon)
 internal/plaza/      map, isometric tiles, portals
 internal/ui/         login, overworld, chat, inventory, friends, toast
-internal/render/     canvas, sixel, iso, light, sprites, shimmer, syncwriter
+internal/render/     canvas, sixel, iso, light, frame, sprites, shimmer, syncwriter
 internal/style/      palette, themes
 internal/anim/       camera spring, flicker helpers
 ```

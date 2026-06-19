@@ -260,7 +260,13 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 		Player:    player,
 		Save:      world.NewSaveStore(a.deps.repos.Saves, player.ID, w.Key()),
 		Inventory: world.NewInventoryAPI(a.deps.repos.Inventory, player.ID, w.Key()),
-		Exit:      exit,
+		Screen: world.Screen{
+			Pal:   a.deps.env.Pal,
+			Out:   a.deps.env.Out,
+			CellW: a.deps.env.CellW,
+			CellH: a.deps.env.CellH,
+		},
+		Exit: exit,
 	}
 	a.worldModel = w.Init(ctx)
 	a.state = stateWorld

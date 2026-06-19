@@ -28,11 +28,11 @@ import (
 // while keys are held. The hub broadcasts at 20 Hz on its own clock.
 const (
 	animTickEvery = 100 * time.Millisecond
-	moveTickEvery = 50 * time.Millisecond
-	// heldWindow must outlast a terminal's key-autorepeat gap (the ~250ms
-	// pause between the first keydown and the repeat burst) or walking
-	// stutters to a stop the instant you start holding a direction.
-	heldWindow = 260 * time.Millisecond
+	moveTickEvery = 70 * time.Millisecond
+	// heldWindow bridges the gap between key-autorepeat events so walking
+	// stays continuous, but is kept short so releasing a key doesn't coast
+	// the avatar for long (the "movement boost" feel).
+	heldWindow = 180 * time.Millisecond
 )
 
 // Minimum playable terminal size.
@@ -96,9 +96,10 @@ type Model struct {
 	walkCount int
 	onPortal  bool
 
-	cam     *anim.Camera
-	held    map[string]time.Time
-	ticking bool // a moveTick chain is live
+	cam        *anim.Camera
+	held       map[string]time.Time
+	ticking    bool // a moveTick chain is live
+	diagToggle bool // alternates the moved axis on diagonals (uniform speed)
 
 	remotes map[int64]hub.PlayerState
 
@@ -367,17 +368,8 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	moved := false
-	if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
-		m.px += dx
-		moved = true
-	}
-	if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
-		m.py += dy
-		moved = true
-	}
-
-	// Face the direction of effort even when blocked.
+	// Face the direction of effort (from the full intent, before the diagonal
+	// normalization below, so the sprite doesn't flip facing every tick).
 	switch {
 	case dx < 0:
 		m.dir = hub.DirLeft
@@ -387,6 +379,31 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 		m.dir = hub.DirUp
 	case dy > 0:
 		m.dir = hub.DirDown
+	}
+
+	// Keep diagonal speed equal to cardinal: advance only one axis per step,
+	// alternating, so a diagonal walk is a same-pace staircase rather than a
+	// sqrt(2) sprint.
+	if dx != 0 && dy != 0 {
+		if m.diagToggle {
+			dy = 0
+		} else {
+			dx = 0
+		}
+		m.diagToggle = !m.diagToggle
+	}
+
+	// Both axes advance one whole cell per step. py is in half-cell rows (a
+	// half-block-era unit), so a vertical step is ±2 — without this the avatar
+	// drifted vertically at half the horizontal speed.
+	moved := false
+	if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
+		m.px += dx
+		moved = true
+	}
+	if dy != 0 && !m.world.Blocked(m.px, m.py/2+dy) {
+		m.py += 2 * dy
+		moved = true
 	}
 
 	if moved {

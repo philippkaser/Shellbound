@@ -137,6 +137,22 @@ func (c *Canvas) FillCircle(cx, cy, r int, col Color) {
 	}
 }
 
+// FillEllipse fills an axis-aligned ellipse of radii (rx, ry) centered at
+// (cx, cy). Used for avatar drop shadows and portal ground glows.
+func (c *Canvas) FillEllipse(cx, cy, rx, ry int, col Color) {
+	if rx <= 0 || ry <= 0 {
+		return
+	}
+	rx2, ry2 := rx*rx, ry*ry
+	for dy := -ry; dy <= ry; dy++ {
+		for dx := -rx; dx <= rx; dx++ {
+			if dx*dx*ry2+dy*dy*rx2 <= rx2*ry2 {
+				c.Set(cx+dx, cy+dy, col)
+			}
+		}
+	}
+}
+
 // Clone returns a deep copy (used to snapshot the static plaza base once).
 func (c *Canvas) Clone() *Canvas {
 	n := New(c.W, c.H)

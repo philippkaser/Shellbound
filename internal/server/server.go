@@ -166,7 +166,7 @@ func (s *Server) programHandler(sess ssh.Session) *tea.Program {
 		return notice("storage trouble — please try again in a moment")
 	}
 
-	cw, ch := cellSize()
+	cw, ch := cellSize(sess)
 	sid := sess.Context().SessionID()
 	a := newApp(appDeps{
 		hub:       s.cfg.Hub,
@@ -196,26 +196,37 @@ func sixelEnabled() bool {
 	}
 }
 
-// cellSize returns the assumed terminal cell size in pixels, overridable with
-// SHELLBOUND_CELL="WxH". The frame is sized to the cell grid times this, so a
-// value close to the client's real cell size makes the image fill the window.
-func cellSize() (int, int) {
-	// Conservative defaults: under-estimating a client's real cell size only
-	// letterboxes the image, whereas over-estimating makes it taller than the
-	// screen and scroll. Tune up with SHELLBOUND_CELL to fill the window.
+// cellSize returns the terminal's cell size in pixels — needed to center the
+// Sixel image accurately and to size it without scrolling. It is taken from
+// the client's PTY pixel dimensions when present (most modern terminals send
+// them), then a SHELLBOUND_CELL="WxH" override, then a conservative default.
+func cellSize(sess ssh.Session) (int, int) {
 	const defW, defH = 8, 16
-	v := os.Getenv("SHELLBOUND_CELL")
-	if v == "" {
-		return defW, defH
+
+	// Preferred: derive from the PTY's drawable pixel size / cell grid.
+	if pty, _, ok := sess.Pty(); ok {
+		w := pty.Window.Width
+		h := pty.Window.Height
+		pw := pty.Window.WidthPixels
+		ph := pty.Window.HeightPixels
+		if w > 0 && h > 0 && pw > 0 && ph > 0 {
+			cw, ch := pw/w, ph/h
+			// Sanity-bound against bogus reports.
+			if cw >= 4 && cw <= 32 && ch >= 6 && ch <= 64 {
+				return cw, ch
+			}
+		}
 	}
-	parts := strings.SplitN(strings.ToLower(v), "x", 2)
-	if len(parts) != 2 {
-		return defW, defH
+
+	if v := os.Getenv("SHELLBOUND_CELL"); v != "" {
+		parts := strings.SplitN(strings.ToLower(v), "x", 2)
+		if len(parts) == 2 {
+			w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+			h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err1 == nil && err2 == nil && w > 0 && h > 0 {
+				return w, h
+			}
+		}
 	}
-	w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
-		return defW, defH
-	}
-	return w, h
+	return defW, defH
 }

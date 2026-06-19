@@ -1,6 +1,7 @@
 package overworld
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/frame"
 	"github.com/shellbound/shellbound/internal/render/iso"
 	"github.com/shellbound/shellbound/internal/render/light"
 	"github.com/shellbound/shellbound/internal/render/sprites"
@@ -30,45 +32,10 @@ const (
 // our graphics.
 func (m Model) View() string { return " " }
 
-// computeGeom returns the frame's pixel size (a whole number of terminal
-// cells, capped) and the cursor-positioning prefix that centers it in the
-// window.
+// computeGeom returns the frame's pixel size and the cursor-positioning prefix
+// that centers it in the window (see frame.Geometry).
 func (m *Model) computeGeom() (pw, ph int, prefix string) {
-	cw, ch := m.cellW, m.cellH
-	if cw <= 0 {
-		cw = 8
-	}
-	if ch <= 0 {
-		ch = 16
-	}
-	pw, ph = m.termW*cw, m.termH*ch
-	if pw > maxCanvasW {
-		pw = maxCanvasW
-	}
-	if ph > maxCanvasH {
-		ph = maxCanvasH
-	}
-	// Snap to whole cells so centering is exact.
-	pw = (pw / cw) * cw
-	ph = (ph / ch) * ch
-	if pw < cw {
-		pw = cw
-	}
-	if ph < ch {
-		ph = ch
-	}
-
-	imgCols, imgRows := pw/cw, ph/ch
-	leftCols := (m.termW - imgCols) / 2
-	topRows := (m.termH - imgRows) / 2
-	if leftCols < 0 {
-		leftCols = 0
-	}
-	if topRows < 0 {
-		topRows = 0
-	}
-	prefix = "\x1b[?25l\x1b[" + itoa(topRows+1) + ";" + itoa(leftCols+1) + "H"
-	return pw, ph, prefix
+	return frame.Geometry(m.termW, m.termH, m.cellW, m.cellH, maxCanvasW, maxCanvasH)
 }
 
 // drawScene bakes one full frame into m.screen and returns the cursor prefix
@@ -94,16 +61,19 @@ func (m *Model) drawScene() string {
 	originSx := csx - float64(pw)/2
 	originSy := csy - float64(ph)/2
 
-	// World, portals (the only color on the map), then players on top.
+	// World, portals (the only color on the map), drifting dust, then players.
 	m.world.RenderIso(m.screen, originSx, originSy, t)
 	for _, p := range plaza.Portals {
 		p.RenderIso(m.screen, m.field, t, originSx, originSy)
 	}
+	m.drawMotes(pw, ph, t)
 	m.drawPlayers(originSx, originSy, t)
 
 	// Interactive lighting: dim the plaza and let the player and lamps reveal
-	// it, with blocky glow halos. Applied before the UI so text stays readable.
+	// it, with blocky glow halos. Then a cinematic vignette. Both run before
+	// the UI so text stays full-brightness and readable.
 	m.applyLighting(originSx, originSy, t, pw, ph)
+	light.Vignette(m.screen, 0.5)
 
 	// Text overlays, baked into the same image at full brightness.
 	m.chat.RenderHistory(m.screen, now, 4, ph-3*canvas.LineH, pw*2/3)
@@ -144,12 +114,12 @@ func (m *Model) drawPlayers(originSx, originSy, t float64) {
 	})
 
 	for _, st := range states {
-		frame := 0
+		walkFrame := 0
 		if st.Moving {
 			if st.Info.ID == m.player.ID {
-				frame = m.walkCount / 2
+				walkFrame = m.walkCount / 2
 			} else {
-				frame = int(t * 6)
+				walkFrame = int(t * 6)
 			}
 		}
 		gx := float64(st.Pos.X)
@@ -157,11 +127,47 @@ func (m *Model) drawPlayers(originSx, originSy, t float64) {
 		sx, sy := iso.Project(gx, gy)
 		footX := int(sx - originSx)
 		footY := int(sy-originSy) + iso.HH
-		sprites.Draw(m.screen, footX, footY, sprites.Facing(st.Dir), frame, st.Moving)
+
+		// Drop shadow on the ground grounds the avatar (stays put under the bob).
+		m.screen.FillEllipse(footX, footY, sprites.Width/2, 4, 0x050505)
+
+		// Idle bob: float gently when standing still; the walk cycle carries
+		// the motion otherwise.
+		drawFootY := footY
+		if !st.Moving {
+			drawFootY -= int(2 * math.Sin(t*1.8+float64(st.Info.ID%16)))
+		}
+		sprites.Draw(m.screen, footX, drawFootY, sprites.Facing(st.Dir), walkFrame, st.Moving)
 
 		nameW := canvas.TextWidth(st.Info.Name)
-		nameY := footY - sprites.Height - canvas.LineH
+		nameY := drawFootY - sprites.Height - canvas.LineH
 		m.screen.DrawTextShadow(footX-nameW/2, nameY, st.Info.Name, canvas.Hex(st.Info.Color), 0x000000)
+	}
+}
+
+// drawMotes scatters slow-drifting dust into the air. They are grey, so the
+// lighting pass makes them glint as they pass through the player's and lamps'
+// light — atmospheric specks rather than a fixed starfield.
+func (m *Model) drawMotes(pw, ph int, t float64) {
+	const n = 30
+	for i := 0; i < n; i++ {
+		sx := float64((i*131+37)%1000) / 1000
+		sy := float64((i*257+91)%1000) / 1000
+		speed := 5 + float64(i%6)*2.5
+		x := int(sx*float64(pw)+t*speed) % (pw + 24)
+		if x < 0 {
+			x += pw + 24
+		}
+		x -= 12
+		y := int(sy*float64(ph)) + int(5*math.Sin(t*0.6+float64(i)))
+		if x < 0 || x >= pw || y < 0 || y >= ph {
+			continue
+		}
+		col := canvas.Color(0x303030)
+		if i%5 == 0 {
+			col = 0x4A4A4A
+		}
+		m.screen.Set(x, y, col)
 	}
 }
 

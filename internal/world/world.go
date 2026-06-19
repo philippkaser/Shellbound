@@ -14,7 +14,21 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/syncwriter"
 )
+
+// Screen gives a world everything it needs to ship Sixel frames the same way
+// the plaza does: a shared palette, the synchronized session writer, and the
+// terminal's cell size in pixels (for centering). A world that prefers plain
+// text can ignore it and just return a string from View.
+type Screen struct {
+	Pal   *canvas.Palette
+	Out   *syncwriter.Writer
+	CellW int
+	CellH int
+}
 
 // PlayerInfo identifies the player inside a world, without exposing
 // anything sensitive.
@@ -45,6 +59,9 @@ type Context struct {
 	Player    PlayerInfo
 	Save      SaveStore
 	Inventory InventoryAPI
+	// Screen is the shared Sixel rendering surface (palette, session writer,
+	// cell size) for worlds that draw pixel graphics.
+	Screen Screen
 	// Exit returns the player to the plaza. Safe to call multiple times;
 	// calls after the first are no-ops.
 	Exit func()

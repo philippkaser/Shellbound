@@ -26,10 +26,11 @@ type Portal struct {
 	X, Y int
 }
 
-// Portals is the 1.0 set, standing against the north wall. All three keys
-// resolve to the "coming soon" placeholder world for now.
+// Portals is the 1.0 set, standing against the north wall. Starfall is the
+// first real world; the other two still resolve to the "coming soon"
+// placeholder.
 var Portals = []Portal{
-	{Key: "bomberman", Name: "Bomberman", X: 12, Y: 3},
+	{Key: "starfall", Name: "Starfall", X: 12, Y: 3},
 	{Key: "chess", Name: "Chess", X: 45, Y: 3},
 	{Key: "doom", Name: "Doom", X: 78, Y: 3},
 }
@@ -82,9 +83,35 @@ func (p Portal) RenderIso(c *canvas.Canvas, f *shimmer.Field, t, originSx, origi
 	// Pedestal lip under the arch.
 	c.FillRect(ax-half-2, groundY, archW+4, 2, 0x404040)
 
+	// Colored glow pool spilling onto the floor — a reflection of the portal's
+	// light, and a sanctioned splash of color.
+	pool := f.At(half, archH/2, t)
+	glowRX, glowRY := half+10, 12
+	for dy := -glowRY; dy <= glowRY; dy++ {
+		for dx := -glowRX; dx <= glowRX; dx++ {
+			fx, fy := float64(dx)/float64(glowRX), float64(dy)/float64(glowRY)
+			d := fx*fx + fy*fy
+			if d >= 1 {
+				continue
+			}
+			gx, gy := ax+dx, groundY+5+dy
+			c.Set(gx, gy, c.At(gx, gy).Lighten(pool.Scale((1-d)*0.5)))
+		}
+	}
+
+	// Sparks rising through the arch, looping — bright, shimmer-tinted motes.
+	for i := 0; i < 6; i++ {
+		rise := math.Mod(t*0.35+float64(i)*0.17, 1.0) // 0 (ground) .. 1 (top)
+		sy := groundY - int(rise*float64(archH))
+		drift := int(float64(half-8) * math.Sin(t*1.4+float64(i)*2.1))
+		spark := f.At(drift+half, sy-topY, t).Lerp(0xFFFFFF, 0.5)
+		c.Set(ax+drift, sy, spark)
+		c.Set(ax+drift, sy-1, spark.Scale(0.6))
+	}
+
 	// Name label, centered beneath, white with a black shadow for legibility.
 	lw := canvas.TextWidth(p.Name)
-	c.DrawTextShadow(ax-lw/2, groundY+4, p.Name, 0xFFFFFF, 0x000000)
+	c.DrawTextShadow(ax-lw/2, groundY+18, p.Name, 0xFFFFFF, 0x000000)
 }
 
 // PortalAt returns the portal whose trigger zone contains feet cell (cx, cy).

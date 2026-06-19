@@ -48,10 +48,10 @@ type playerSnapshot struct {
 // bubbletea goroutine and handed across under a mutex; all slices are fresh
 // copies, so the render loop can read them without further locking.
 type frameSnapshot struct {
-	termW, termH     int
-	termPxW, termPxH int // drawable pixels, 0 if unknown
-	players          []playerSnapshot
-	selfID           int64
+	termW, termH int
+	cellW, cellH int // pixels per cell (best known estimate)
+	players      []playerSnapshot
+	selfID       int64
 
 	chat       []chat.Entry
 	toast      string
@@ -78,10 +78,9 @@ type entity struct {
 // camera motion at the render rate, so movement stays smooth no matter how the
 // logic ticks.
 type Renderer struct {
-	pal          *canvas.Palette
-	out          *syncwriter.Writer
-	cellW, cellH int
-	world        *plaza.Map
+	pal   *canvas.Palette
+	out   *syncwriter.Writer
+	world *plaza.Map
 
 	screen  *canvas.Canvas
 	sb      *strings.Builder
@@ -105,10 +104,12 @@ type Renderer struct {
 	stopCh   chan struct{}
 }
 
-// NewRenderer builds a renderer for one session (not yet running).
-func NewRenderer(env Env, world *plaza.Map) *Renderer {
+// NewRenderer builds a renderer for one session (not yet running). The cell
+// size arrives per-frame in the snapshot, so it isn't needed here.
+func NewRenderer(pal *canvas.Palette, out *syncwriter.Writer, world *plaza.Map) *Renderer {
 	r := &Renderer{
-		pal: env.Pal, out: env.Out, cellW: env.CellW, cellH: env.CellH,
+		pal:    pal,
+		out:    out,
 		world:  world,
 		screen: canvas.New(1, 1),
 		sb:     &strings.Builder{},
@@ -183,39 +184,29 @@ func (r *Renderer) frame() {
 	}
 }
 
-// dims returns the frame's pixel size (capped to the play-area maximum) and
-// the top-left cell offset that centers it in the terminal.
+// dims returns the frame's pixel size (a whole number of cells, capped to the
+// play-area maximum) and the top-left cell offset that centers it.
 //
-// When the client reports its drawable pixel size we derive the real cell
-// size from it, make the image a whole number of cells, and center exactly.
-// Otherwise we fall back to the assumed cell size (SHELLBOUND_CELL), which
-// can leave centering slightly off if the guess is wrong.
+// The cell size comes from the snapshot — derived from a terminal query or a
+// consistent pixel report, falling back to SHELLBOUND_CELL. Because it is
+// stable across window resizes, sizing never goes briefly wrong when only the
+// column/row count changes. The image is held to one fewer row than the
+// terminal as cheap insurance against a Sixel scroll.
 func (r *Renderer) dims(snap frameSnapshot) (pw, ph, left, top int) {
 	cols, rows := snap.termW, snap.termH
-
-	cw, ch := r.cellW, r.cellH
-	if cw <= 0 {
+	cw, ch := snap.cellW, snap.cellH
+	if cw < 1 {
 		cw = 8
 	}
-	if ch <= 0 {
+	if ch < 1 {
 		ch = 16
 	}
-	if snap.termPxW > 0 && snap.termPxH > 0 && cols > 0 && rows > 0 {
-		cw, ch = snap.termPxW/cols, snap.termPxH/rows
-		if cw < 1 {
-			cw = 1
-		}
-		if ch < 1 {
-			ch = 1
-		}
-	}
 
-	// Image spans whole cells, capped to the play area.
 	imgCols := cols
 	if maxCols := maxWorldW / cw; imgCols > maxCols {
 		imgCols = maxCols
 	}
-	imgRows := rows
+	imgRows := rows - 1 // leave the bottom row free so the image can't scroll
 	if maxRows := maxWorldH / ch; imgRows > maxRows {
 		imgRows = maxRows
 	}

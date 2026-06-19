@@ -52,11 +52,18 @@ type DisconnectMsg struct {
 	Reason string
 }
 
-// PixelSizeMsg carries the terminal's drawable size in pixels (from the SSH
-// pty-req / window-change). The renderer uses it to derive the real cell size,
-// so the image fills whole cells and centers exactly. Sent only when the
-// client reports pixel dimensions.
-type PixelSizeMsg struct{ W, H int }
+// PixelSizeMsg carries the terminal's cell grid AND drawable pixels together
+// (from the SSH pty-req / window-change), so the cell size can be derived from
+// a single consistent pair. Sent only when the client reports pixel
+// dimensions. Carrying both avoids the resize race where cols/rows update
+// before pixels and the derived cell size is briefly — and destructively —
+// wrong.
+type PixelSizeMsg struct{ Cols, Rows, W, H int }
+
+// CellSizeMsg carries the terminal's character cell size in pixels, obtained
+// by querying the terminal directly (CSI 16 t). It's the most reliable source
+// of cell size — many terminals don't report pixel dimensions over SSH.
+type CellSizeMsg struct{ W, H int }
 
 // Internal tick/event messages.
 type animTickMsg time.Time
@@ -101,8 +108,8 @@ type Model struct {
 	toasts  toast.Model
 	unread  map[int64]string // player id -> username with unseen DMs
 
-	termW, termH     int
-	termPxW, termPxH int // drawable size in pixels, 0 if the client didn't report
+	termW, termH int
+	cellW, cellH int // pixels per terminal cell; best known estimate
 }
 
 // New creates the overworld for a logged-in player. env carries the shared
@@ -128,13 +135,23 @@ func New(
 		}
 	}
 
-	r := NewRenderer(env, plazaMap)
+	r := NewRenderer(env.Pal, env.Out, plazaMap)
 	r.Start()
+
+	cellW, cellH := env.CellW, env.CellH
+	if cellW <= 0 {
+		cellW = 8
+	}
+	if cellH <= 0 {
+		cellH = 16
+	}
 
 	m := Model{
 		theme:    theme,
 		world:    plazaMap,
 		renderer: r,
+		cellW:    cellW,
+		cellH:    cellH,
 		repos:    repos,
 		player:   player,
 		handle:   handle,
@@ -204,7 +221,7 @@ func (m *Model) publish() {
 
 	m.renderer.Submit(frameSnapshot{
 		termW: m.termW, termH: m.termH,
-		termPxW: m.termPxW, termPxH: m.termPxH,
+		cellW: m.cellW, cellH: m.cellH,
 		players: players, selfID: m.player.ID,
 		chat:       append([]chat.Entry(nil), m.chat.History()...),
 		toast:      m.toasts.Message(),
@@ -249,7 +266,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case PixelSizeMsg:
-		m.termPxW, m.termPxH = msg.W, msg.H
+		// Derive cell size from the consistent (cols/rows, pixels) pair. Cell
+		// size is stable across window resizes, so this won't fight the
+		// separate WindowSizeMsg.
+		if msg.Cols > 0 && msg.Rows > 0 && msg.W > 0 && msg.H > 0 {
+			m.cellW, m.cellH = max(1, msg.W/msg.Cols), max(1, msg.H/msg.Rows)
+		}
+		m.publish()
+		return m, nil
+
+	case CellSizeMsg:
+		if msg.W > 0 && msg.H > 0 {
+			m.cellW, m.cellH = msg.W, msg.H
+		}
 		m.publish()
 		return m, nil
 

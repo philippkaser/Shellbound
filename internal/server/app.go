@@ -64,6 +64,7 @@ type app struct {
 
 	lastSize  tea.WindowSizeMsg
 	lastPixel overworld.PixelSizeMsg
+	lastCell  overworld.CellSizeMsg
 }
 
 // newApp builds the session model. player is nil on first connect, which
@@ -167,6 +168,15 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case overworld.CellSizeMsg:
+		a.lastCell = msg
+		if a.joined {
+			var cmd tea.Cmd
+			a.over, cmd = a.over.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
 	case login.DoneMsg:
 		if msg.Player == nil {
 			return a, tea.Quit
@@ -182,6 +192,11 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.lastPixel.W > 0 {
 			var cmd tea.Cmd
 			a.over, cmd = a.over.Update(a.lastPixel)
+			cmds = append(cmds, cmd)
+		}
+		if a.lastCell.W > 0 {
+			var cmd tea.Cmd
+			a.over, cmd = a.over.Update(a.lastCell)
 			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)

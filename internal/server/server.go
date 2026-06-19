@@ -158,7 +158,12 @@ func (s *Server) bubbleteaMiddleware(next ssh.Handler) ssh.Handler {
 				case w := <-windowChanges:
 					prog.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
 					if w.WidthPixels > 0 && w.HeightPixels > 0 {
-						prog.Send(overworld.PixelSizeMsg{W: w.WidthPixels, H: w.HeightPixels})
+						// Carry cols/rows with the pixels so the cell size is
+						// derived from one consistent pair.
+						prog.Send(overworld.PixelSizeMsg{
+							Cols: w.Width, Rows: w.Height,
+							W: w.WidthPixels, H: w.HeightPixels,
+						})
 					}
 				}
 			}
@@ -183,7 +188,9 @@ func (s *Server) programHandler(sess ssh.Session) *tea.Program {
 	theme := style.NewTheme(renderer)
 
 	out := syncwriter.New(sess)
-	baseOpts := []tea.ProgramOption{tea.WithInput(sess), tea.WithOutput(out), tea.WithAltScreen()}
+	// Wrap input so we can capture the terminal's cell-size reply (CSI 16 t).
+	csr := &cellSizeReader{src: sess}
+	baseOpts := []tea.ProgramOption{tea.WithInput(csr), tea.WithOutput(out), tea.WithAltScreen()}
 	notice := func(text string) *tea.Program {
 		return tea.NewProgram(newNoticeModel(theme, text), baseOpts...)
 	}
@@ -220,7 +227,13 @@ func (s *Server) programHandler(sess ssh.Session) *tea.Program {
 		},
 	}, theme, fp, player)
 	log.Info("session started", "fingerprint", fp, "known", player != nil)
-	return tea.NewProgram(a, baseOpts...)
+
+	prog := tea.NewProgram(a, baseOpts...)
+	// Ask the terminal for its cell size; the reply is captured by csr and
+	// fed back as a CellSizeMsg so the renderer can center the image exactly.
+	csr.onCell = func(w, h int) { prog.Send(overworld.CellSizeMsg{W: w, H: h}) }
+	_, _ = out.WriteString("\x1b[16t")
+	return prog
 }
 
 // sixelEnabled reports whether to serve the Sixel renderer. Auto-detecting

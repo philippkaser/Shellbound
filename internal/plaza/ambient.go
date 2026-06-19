@@ -36,7 +36,7 @@ func (m *Map) renderFireflies(c *canvas.Canvas, originSx, originSy, t float64) {
 		if tw < 0.3 {
 			continue
 		}
-		mote(c, px, py, 4, uint8(150+tw*105))
+		mote(c, px, py, 2, uint8(150+tw*105))
 	}
 }
 

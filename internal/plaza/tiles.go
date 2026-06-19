@@ -107,18 +107,18 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		ph := anim.Phase(t, 4, 3, p.X)
 		crest := []canvas.Color{toneMid, toneLight, toneMid}[ph]
 		topY := py - statueH
-		c.FillCircle(px, topY-5, 2, crest)
-		c.Set(px, topY-9, toneLight)
-		for d := 0; d < 6; d++ {
+		c.FillCircle(px, topY-6, 3, crest)
+		c.FillCircle(px, topY-12, 2, toneLight)
+		for d := 0; d < 9; d++ {
 			fd := float64(d)
-			prog := math.Mod(t*1.4+fd*0.37, 1.0) // 0..1 life of a droplet
+			prog := math.Mod(t*1.4+fd*0.27, 1.0) // 0..1 life of a droplet
 			dir := 1.0
 			if d%2 == 0 {
 				dir = -1.0
 			}
-			dx := int(dir * prog * (4 + fd))
-			dy := int(-22*prog + 26*prog*prog) // up then accelerating down
-			c.Set(px+dx, topY-8+dy, toneLight)
+			dx := int(dir * prog * (5 + fd))
+			dy := int(-30*prog + 36*prog*prog)             // up then accelerating down
+			c.FillRect(px+dx, topY-12+dy, 2, 2, toneLight) // 2x2 droplet
 		}
 	}
 }

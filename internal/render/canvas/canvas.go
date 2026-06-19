@@ -18,7 +18,8 @@ import (
 type Canvas struct {
 	W, H int
 	px   []Color
-	idx  []byte // reused index scratch for Sixel encoding
+	idx  []byte        // reused index scratch for Sixel encoding
+	enc  sixel.Encoder // reused encoder scratch (no per-frame garbage)
 }
 
 // New allocates a w×h canvas, clamped to at least 1×1.
@@ -180,5 +181,5 @@ func (c *Canvas) EncodeSixel(sb *strings.Builder, pal *Palette) {
 	for i, col := range c.px {
 		c.idx[i] = pal.Index(col)
 	}
-	sixel.Encode(sb, c.idx, c.W, c.H, pal.RGB())
+	c.enc.Encode(sb, c.idx, c.W, c.H, pal.RGB())
 }

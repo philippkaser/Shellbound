@@ -13,8 +13,8 @@ const (
 	PortalW = 10
 	PortalH = 6
 
-	archW = 44 // billboard width in pixels
-	archH = 60 // billboard height in pixels
+	archW = 64 // billboard width in pixels
+	archH = 92 // billboard height in pixels
 )
 
 // Portal is one gateway in the plaza referencing a world by key. X, Y is the

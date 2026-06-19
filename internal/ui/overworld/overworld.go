@@ -29,7 +29,10 @@ import (
 const (
 	animTickEvery = 100 * time.Millisecond
 	moveTickEvery = 50 * time.Millisecond
-	heldWindow    = 140 * time.Millisecond
+	// heldWindow must outlast a terminal's key-autorepeat gap (the ~250ms
+	// pause between the first keydown and the repeat burst) or walking
+	// stutters to a stop the instant you start holding a direction.
+	heldWindow = 260 * time.Millisecond
 )
 
 // Minimum playable terminal size.
@@ -84,6 +87,7 @@ type Model struct {
 	out          *syncwriter.Writer
 	cellW, cellH int
 	active       bool
+	inFlight     bool // a frame is being encoded/written; gate the next one
 
 	// Local avatar: feet position as (cell column, half-block pixel row).
 	px, py    int
@@ -104,9 +108,10 @@ type Model struct {
 	toasts  toast.Model
 	unread  map[int64]string // player id -> username with unseen DMs
 
-	field  *shimmer.Field
-	lights *light.Field
-	start  time.Time
+	field   *shimmer.Field
+	lights  *light.Field
+	start   time.Time
+	lastCam time.Time // wall clock of the last camera advance
 
 	termW, termH int
 	screen       *canvas.Canvas
@@ -159,6 +164,7 @@ func New(
 		field:   shimmer.NewField(),
 		lights:  light.NewField(),
 		start:   time.Now(),
+		lastCam: time.Now(),
 		screen:  canvas.New(1, 1),
 		sb:      &strings.Builder{},
 	}
@@ -168,9 +174,11 @@ func New(
 }
 
 // SetActive marks whether the overworld currently owns the screen. While a
-// portal world is on top it is inactive and emits no frames.
+// portal world is on top it is inactive and emits no frames. Toggling clears
+// the in-flight gate so the next owner can repaint immediately.
 func (m Model) SetActive(b bool) Model {
 	m.active = b
+	m.inFlight = false
 	return m
 }
 
@@ -203,24 +211,29 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termW, m.termH = msg.Width, msg.Height
-		if m.active {
-			return m, m.writeFrameCmd(m.renderFrame())
-		}
-		return m, nil
+		// Don't touch inFlight here: a frame mid-encode is still reading the
+		// canvas on another goroutine. maybeRender no-ops if one is in flight;
+		// the next tick repaints at the new size once it completes.
+		next, rcmd := m.maybeRender()
+		// Clear so a stale, differently-centered image leaves no remnants.
+		return next, tea.Batch(tea.ClearScreen, rcmd)
 
 	case animTickMsg:
 		now := time.Time(msg)
 		m.toasts.Tick(now)
-		m.cam.Update(float64(m.px), float64(m.py)/2)
-		if m.active {
-			return m, tea.Batch(animTick(), m.writeFrameCmd(m.renderFrame()))
-		}
-		return m, animTick()
+		m = m.advanceCam(now)
+		next, rcmd := m.maybeRender()
+		return next, tea.Batch(animTick(), rcmd)
 
 	case moveTickMsg:
-		return m.stepMovement()
+		now := time.Time(msg)
+		next, cmd := m.stepMovement()
+		next = next.advanceCam(now)
+		next, rcmd := next.maybeRender()
+		return next, tea.Batch(cmd, rcmd)
 
 	case frameDoneMsg:
+		m.inFlight = false
 		return m, nil
 
 	case hubEventMsg:
@@ -379,7 +392,6 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 	if moved {
 		m.walkCount++
 		m.moving = true
-		m.cam.Update(float64(m.px), float64(m.py)/2)
 		m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, true)
 
 		// Portal trigger: fires on the transition into a mouth, not while
@@ -446,19 +458,41 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 func (m Model) ResumeFromWorld() Model {
 	m.cam.Snap(float64(m.px), float64(m.py)/2)
 	m.active = true
+	m.inFlight = false
 	return m
 }
 
-// writeFrameCmd writes a pre-built Sixel frame to the session off the update
-// goroutine. The frame string is immutable and the writer is mutex-guarded,
-// so this never races the model or bubbletea's renderer.
-func (m Model) writeFrameCmd(frame string) tea.Cmd {
-	if frame == "" || m.out == nil {
-		return nil
+// advanceCam steps the follow-camera toward the player by the real time
+// elapsed since the last advance, so the follow speed is independent of how
+// often (10–20 Hz) ticks actually fire.
+func (m Model) advanceCam(now time.Time) Model {
+	dt := now.Sub(m.lastCam).Seconds()
+	if dt <= 0 {
+		dt = 1.0 / 30
 	}
-	out := m.out
-	return func() tea.Msg {
-		_, _ = out.WriteString(frame)
+	m.lastCam = now
+	m.cam.Advance(float64(m.px), float64(m.py)/2, dt)
+	return m
+}
+
+// maybeRender draws the next frame on the update goroutine (cheap) and ships
+// the heavy Sixel encode + session write off-thread. At most one frame is ever
+// in flight, so output paces itself to the SSH write speed: frames never pile
+// up into lag spikes, and the encode never blocks input handling. Returns a
+// nil Cmd (a no-op for tea.Batch) when a frame is already in flight or the
+// overworld doesn't currently own the screen.
+func (m Model) maybeRender() (Model, tea.Cmd) {
+	if !m.active || m.inFlight || m.out == nil || m.termW <= 0 || m.termH <= 0 {
+		return m, nil
+	}
+	prefix := m.drawScene()
+	m.inFlight = true
+	screen, sb, pal, out := m.screen, m.sb, m.pal, m.out
+	return m, func() tea.Msg {
+		sb.Reset()
+		sb.WriteString(prefix)
+		screen.EncodeSixel(sb, pal)
+		_, _ = out.WriteString(sb.String())
 		return frameDoneMsg{}
 	}
 }

@@ -23,13 +23,13 @@ const (
 	toneShadow    = canvas.Color(0x2A2A2A)
 )
 
-// Structure heights in pixels.
+// Structure heights in pixels (scaled to the isometric tile size).
 const (
-	wallH    = 14
-	pillarH  = 22
-	benchH   = 5
-	statueH  = 20
-	lampPost = 20
+	wallH    = 24
+	pillarH  = 38
+	benchH   = 9
+	statueH  = 34
+	lampPost = 34
 )
 
 // project converts a cell to its ground-diamond top vertex in canvas pixels,
@@ -44,7 +44,7 @@ func project(gx, gy int, originSx, originSy float64) (int, int) {
 // screen-space point at the canvas's top-left; t is seconds since server
 // start (drives water ripple and statue spray).
 func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
-	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 3)
+	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 4)
 	gx0, gy0 = clampi(gx0, 0, m.W-1), clampi(gy0, 0, m.H-1)
 	gx1, gy1 = clampi(gx1, 0, m.W-1), clampi(gy1, 0, m.H-1)
 
@@ -124,8 +124,8 @@ func (m *Map) drawWater(c *canvas.Canvas, px, py, gx, gy int, t float64) {
 func (m *Map) drawLampPost(c *canvas.Canvas, px, py int) {
 	cx := px
 	baseY := py + iso.HH
-	c.FillRect(cx-1, baseY-lampPost, 2, lampPost, toneDim)
-	c.FillCircle(cx, baseY-lampPost, 2, toneWhite)
+	c.FillRect(cx-1, baseY-lampPost, 3, lampPost, toneDim)
+	c.FillCircle(cx, baseY-lampPost, 3, toneWhite)
 }
 
 // LampHead returns the canvas pixel of a lamp's glowing head for a cell,

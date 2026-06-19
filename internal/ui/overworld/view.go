@@ -13,24 +13,27 @@ import (
 	"github.com/shellbound/shellbound/internal/render/sprites"
 )
 
-// Canvas resolution caps. The frame is sized to the terminal's pixel
-// dimensions but bounded here so a huge window can't blow up per-frame Sixel
-// bandwidth; a capped frame simply renders a smaller world view at home.
+// Viewport caps in pixels. Bounding the image in *pixels* (not cells) means
+// everyone sees the same slice of the world regardless of their cell size or
+// window: bigger terminals just get more letterbox around a centered image.
+// At the current tile size this is ~16 tiles wide, with the avatar a clear
+// ~1/13 of the frame height.
 const (
-	maxCanvasW = 1600
-	maxCanvasH = 900
+	maxCanvasW = 896
+	maxCanvasH = 560
 )
 
 // View returns a constant sentinel. The plaza does not render through
 // bubbletea: it bakes a full frame into a pixel canvas and ships it as one
-// Sixel image straight to the session (see writeFrameCmd). Returning the same
+// Sixel image straight to the session (see maybeRender). Returning the same
 // string every call keeps bubbletea's renderer quiescent so it never clobbers
 // our graphics.
 func (m Model) View() string { return " " }
 
-// canvasDims returns the frame's pixel size from the terminal cell grid and
-// the probed cell size, bounded by the resolution caps.
-func (m *Model) canvasDims() (int, int) {
+// computeGeom returns the frame's pixel size (a whole number of terminal
+// cells, capped) and the cursor-positioning prefix that centers it in the
+// window.
+func (m *Model) computeGeom() (pw, ph int, prefix string) {
 	cw, ch := m.cellW, m.cellH
 	if cw <= 0 {
 		cw = 8
@@ -38,37 +41,49 @@ func (m *Model) canvasDims() (int, int) {
 	if ch <= 0 {
 		ch = 16
 	}
-	pw, ph := m.termW*cw, m.termH*ch
+	pw, ph = m.termW*cw, m.termH*ch
 	if pw > maxCanvasW {
 		pw = maxCanvasW
 	}
 	if ph > maxCanvasH {
 		ph = maxCanvasH
 	}
-	if pw < 1 {
-		pw = 1
+	// Snap to whole cells so centering is exact.
+	pw = (pw / cw) * cw
+	ph = (ph / ch) * ch
+	if pw < cw {
+		pw = cw
 	}
-	if ph < 1 {
-		ph = 1
+	if ph < ch {
+		ph = ch
 	}
-	return pw, ph
+
+	imgCols, imgRows := pw/cw, ph/ch
+	leftCols := (m.termW - imgCols) / 2
+	topRows := (m.termH - imgRows) / 2
+	if leftCols < 0 {
+		leftCols = 0
+	}
+	if topRows < 0 {
+		topRows = 0
+	}
+	prefix = "\x1b[?25l\x1b[" + itoa(topRows+1) + ";" + itoa(leftCols+1) + "H"
+	return pw, ph, prefix
 }
 
-// renderFrame bakes one full frame and returns the Sixel string to write. It
-// runs on the bubbletea update goroutine (single-threaded), so reading model
-// state here is race-free; the returned string is then written off-thread.
-func (m *Model) renderFrame() string {
-	if m.termW <= 0 || m.termH <= 0 {
-		return ""
-	}
-	pw, ph := m.canvasDims()
+// drawScene bakes one full frame into m.screen and returns the cursor prefix
+// that positions it. It runs on the bubbletea update goroutine, so reading
+// model state here is race-free; encoding the canvas to Sixel then happens
+// off-thread (see maybeRender), keeping the heavy work off the event loop.
+func (m *Model) drawScene() string {
+	pw, ph, prefix := m.computeGeom()
 	m.screen.Resize(pw, ph)
 	m.screen.Clear(canvas.Black)
 
 	if m.termW < minTermW || m.termH < minTermH {
 		msg := "please resize your terminal to at least 60x20"
 		m.screen.DrawText(pw/2-canvas.TextWidth(msg)/2, ph/2, msg, 0xA1A1A1)
-		return m.frameString()
+		return prefix
 	}
 
 	t := time.Since(m.start).Seconds()
@@ -105,16 +120,7 @@ func (m *Model) renderFrame() string {
 		m.drawInputBar(pw, ph)
 	}
 
-	return m.frameString()
-}
-
-// frameString encodes the canvas to Sixel, prefixed with hide-cursor and a
-// home so the image lands at the top-left every frame.
-func (m *Model) frameString() string {
-	m.sb.Reset()
-	m.sb.WriteString("\x1b[?25l\x1b[H")
-	m.screen.EncodeSixel(m.sb, m.pal)
-	return m.sb.String()
+	return prefix
 }
 
 // drawPlayers bakes every avatar (remote and local), painter-sorted by

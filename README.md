@@ -33,7 +33,7 @@ Configuration is via environment variables:
 | `SHELLBOUND_DB`      | `./shellbound.db`             | SQLite database file   |
 | `SHELLBOUND_HOSTKEY` | `./.ssh/shellbound_ed25519`   | Host key (auto-created)|
 | `SHELLBOUND_SIXEL`   | `on`                          | Set `off` to serve a "use a Sixel terminal" notice instead of graphics |
-| `SHELLBOUND_CELL`    | `8x16`                        | Assumed terminal cell size in pixels (`WxH`); raise it to fill the window, lower it if the image scrolls |
+| `SHELLBOUND_CELL`    | `8x16`                        | Your client's cell size in pixels (`WxH`) — sets where the image is centered; lower it if the image scrolls. The world view itself is pixel-capped (same for everyone). |
 
 Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 
@@ -87,11 +87,13 @@ Enter on a name pre-fills a `/w` to them.
   returns a constant `View` (keeping that renderer quiescent) and writes frames
   itself to a mutex-guarded session writer (`internal/render/syncwriter`) shared
   with Bubble Tea; the SSH layer pins sessions to TrueColor.
-- **Camera.** A `harmonica` spring per axis follows the player in grid space
-  with slight lag; each frame that position is projected to isometric screen
-  space and centered in a pixel canvas sized to the terminal (cell grid ×
-  cell-pixel size, capped for bandwidth). Below 60×20 cells, a resize prompt is
-  baked into the frame instead.
+- **Camera.** A `harmonica` spring per axis follows the player in grid space,
+  advanced by real elapsed time so the follow speed is identical at any frame
+  rate; that position is projected to isometric screen space and centered in
+  the frame. The frame itself is a pixel canvas capped to a fixed maximum
+  (~896×560) and centered in the terminal, so every player sees the same slice
+  of the world and bigger windows just get letterbox. Below 60×20 cells, a
+  resize prompt is baked in instead.
 - **Multiplayer.** One in-memory hub holds all sessions. Input is local
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.

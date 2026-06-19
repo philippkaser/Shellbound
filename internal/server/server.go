@@ -18,7 +18,6 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/activeterm"
-	bm "github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/muesli/termenv"
 
@@ -83,7 +82,7 @@ func New(cfg Config) (*Server, error) {
 		}),
 		wish.WithMiddleware(
 			// Innermost first; wish runs the list back-to-front.
-			bm.MiddlewareWithProgramHandler(s.programHandler, termenv.TrueColor),
+			s.bubbleteaMiddleware,
 			s.cleanupMiddleware,
 			activeterm.Middleware(),
 			logging.Middleware(),
@@ -129,6 +128,47 @@ func (s *Server) cleanupMiddleware(next ssh.Handler) ssh.Handler {
 			s.runTeardowns(sid)
 			s.cfg.Hub.LeaveBySession(sid)
 		}()
+		next(sess)
+	}
+}
+
+// bubbleteaMiddleware runs each session's program and feeds it window-change
+// events. Unlike wish's stock middleware it also forwards the terminal's pixel
+// dimensions (when the client reports them) so the renderer can size and
+// center the Sixel image exactly.
+func (s *Server) bubbleteaMiddleware(next ssh.Handler) ssh.Handler {
+	return func(sess ssh.Session) {
+		prog := s.programHandler(sess)
+		if prog == nil {
+			next(sess)
+			return
+		}
+		_, windowChanges, ok := sess.Pty()
+		if !ok {
+			wish.Fatalln(sess, "no active terminal, skipping")
+			return
+		}
+		ctx, cancel := context.WithCancel(sess.Context())
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					prog.Quit()
+					return
+				case w := <-windowChanges:
+					prog.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+					if w.WidthPixels > 0 && w.HeightPixels > 0 {
+						prog.Send(overworld.PixelSizeMsg{W: w.WidthPixels, H: w.HeightPixels})
+					}
+				}
+			}
+		}()
+		if _, err := prog.Run(); err != nil {
+			log.Error("app exit with error", "error", err)
+		}
+		// Force-kill if still running and restore the terminal after a crash.
+		prog.Kill()
+		cancel()
 		next(sess)
 	}
 }

@@ -48,9 +48,10 @@ type playerSnapshot struct {
 // bubbletea goroutine and handed across under a mutex; all slices are fresh
 // copies, so the render loop can read them without further locking.
 type frameSnapshot struct {
-	termW, termH int
-	players      []playerSnapshot
-	selfID       int64
+	termW, termH     int
+	termPxW, termPxH int // drawable pixels, 0 if unknown
+	players          []playerSnapshot
+	selfID           int64
 
 	chat       []chat.Entry
 	toast      string
@@ -184,7 +185,14 @@ func (r *Renderer) frame() {
 
 // dims returns the frame's pixel size (capped to the play-area maximum) and
 // the top-left cell offset that centers it in the terminal.
-func (r *Renderer) dims(termW, termH int) (pw, ph, left, top int) {
+//
+// When the client reports its drawable pixel size we derive the real cell
+// size from it, make the image a whole number of cells, and center exactly.
+// Otherwise we fall back to the assumed cell size (SHELLBOUND_CELL), which
+// can leave centering slightly off if the guess is wrong.
+func (r *Renderer) dims(snap frameSnapshot) (pw, ph, left, top int) {
+	cols, rows := snap.termW, snap.termH
+
 	cw, ch := r.cellW, r.cellH
 	if cw <= 0 {
 		cw = 8
@@ -192,32 +200,43 @@ func (r *Renderer) dims(termW, termH int) (pw, ph, left, top int) {
 	if ch <= 0 {
 		ch = 16
 	}
-	pw, ph = termW*cw, termH*ch
-	if pw > maxWorldW {
-		pw = maxWorldW
+	if snap.termPxW > 0 && snap.termPxH > 0 && cols > 0 && rows > 0 {
+		cw, ch = snap.termPxW/cols, snap.termPxH/rows
+		if cw < 1 {
+			cw = 1
+		}
+		if ch < 1 {
+			ch = 1
+		}
 	}
-	if ph > maxWorldH {
-		ph = maxWorldH
+
+	// Image spans whole cells, capped to the play area.
+	imgCols := cols
+	if maxCols := maxWorldW / cw; imgCols > maxCols {
+		imgCols = maxCols
 	}
-	if pw < 1 {
-		pw = 1
+	imgRows := rows
+	if maxRows := maxWorldH / ch; imgRows > maxRows {
+		imgRows = maxRows
 	}
-	if ph < 1 {
-		ph = 1
+	if imgCols < 1 {
+		imgCols = 1
 	}
-	cols := (pw + cw - 1) / cw
-	rows := (ph + ch - 1) / ch
-	if left = (termW - cols) / 2; left < 0 {
+	if imgRows < 1 {
+		imgRows = 1
+	}
+	pw, ph = imgCols*cw, imgRows*ch
+	if left = (cols - imgCols) / 2; left < 0 {
 		left = 0
 	}
-	if top = (termH - rows) / 2; top < 0 {
+	if top = (rows - imgRows) / 2; top < 0 {
 		top = 0
 	}
 	return
 }
 
 func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) string {
-	pw, ph, left, top := r.dims(snap.termW, snap.termH)
+	pw, ph, left, top := r.dims(snap)
 	r.screen.Resize(pw, ph)
 	r.screen.Clear(canvas.Black)
 
@@ -328,13 +347,12 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 
 func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float64, pw, ph int) {
 	lights := make([]light.Light, 0, len(r.world.Lamps)+1)
-	var selfX, selfY int
-	hasSelf := false
 	if self := r.ents[snap.selfID]; self != nil {
 		sx, sy := iso.Project(self.fx, self.fy)
-		selfX, selfY = int(sx-originSx), int(sy-originSy)+iso.HH-18
-		hasSelf = true
-		lights = append(lights, light.Light{X: selfX, Y: selfY, Radius: 120, Power: 0.8})
+		lights = append(lights, light.Light{
+			X: int(sx - originSx), Y: int(sy-originSy) + iso.HH - 18,
+			Radius: 120, Power: 0.8,
+		})
 	}
 
 	type glowSpec struct {
@@ -354,9 +372,8 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 
 	r.lights.Apply(r.screen, lights, ambientLight)
 
-	if hasSelf {
-		light.Glow(r.screen, selfX, selfY, 30, 0x9A9A9A)
-	}
+	// The player carries light (added above) but no glowing disc — only the
+	// lamps flare.
 	for _, g := range glows {
 		light.Glow(r.screen, g.x, g.y, 46, canvas.RGB(255, 255, 255).Scale(0.7+0.3*g.k))
 	}

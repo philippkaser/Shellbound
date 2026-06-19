@@ -34,7 +34,7 @@ Configuration is via environment variables:
 | `SHELLBOUND_DB`      | `./shellbound.db`             | SQLite database file   |
 | `SHELLBOUND_HOSTKEY` | `./.ssh/shellbound_ed25519`   | Host key (auto-created)|
 | `SHELLBOUND_SIXEL`   | `on`                          | Set `off` to serve a "use a Sixel terminal" notice instead of graphics |
-| `SHELLBOUND_CELL`    | `8x16`                        | Assumed terminal cell size in pixels (`WxH`); raise it to fill the window, lower it if the image scrolls |
+| `SHELLBOUND_CELL`    | `8x16`                        | Fallback cell size in pixels (`WxH`) used only when the client doesn't report pixel dimensions; otherwise the real size is derived from the PTY |
 
 Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 
@@ -95,7 +95,9 @@ Enter on a name pre-fills a `/w` to them.
   player and camera motion are interpolated at the render rate for smoothness
   independent of the logic tick. The image is centered and capped to a fixed
   play area, so every player sees the same amount of world regardless of
-  terminal size. The SSH layer pins sessions to TrueColor.
+  terminal size; when the client reports its pixel dimensions the real cell
+  size is derived from the PTY so centering is exact. The SSH layer pins
+  sessions to TrueColor.
 - **Camera & motion.** Avatars step on the grid, but the renderer eases each
   one toward its target with frame-rate-independent smoothing and centers the
   camera on the local player, so movement glides. Held keys keep a wide window

@@ -62,7 +62,8 @@ type app struct {
 	internal chan tea.Msg
 	done     chan struct{}
 
-	lastSize tea.WindowSizeMsg
+	lastSize  tea.WindowSizeMsg
+	lastPixel overworld.PixelSizeMsg
 }
 
 // newApp builds the session model. player is nil on first connect, which
@@ -156,6 +157,16 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 
+	case overworld.PixelSizeMsg:
+		// Only the plaza renderer cares about pixel dimensions.
+		a.lastPixel = msg
+		if a.joined {
+			var cmd tea.Cmd
+			a.over, cmd = a.over.Update(msg)
+			return a, cmd
+		}
+		return a, nil
+
 	case login.DoneMsg:
 		if msg.Player == nil {
 			return a, tea.Quit
@@ -166,6 +177,11 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.lastSize.Width > 0 {
 			var cmd tea.Cmd
 			a.over, cmd = a.over.Update(a.lastSize)
+			cmds = append(cmds, cmd)
+		}
+		if a.lastPixel.W > 0 {
+			var cmd tea.Cmd
+			a.over, cmd = a.over.Update(a.lastPixel)
 			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)

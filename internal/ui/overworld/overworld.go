@@ -52,6 +52,12 @@ type DisconnectMsg struct {
 	Reason string
 }
 
+// PixelSizeMsg carries the terminal's drawable size in pixels (from the SSH
+// pty-req / window-change). The renderer uses it to derive the real cell size,
+// so the image fills whole cells and centers exactly. Sent only when the
+// client reports pixel dimensions.
+type PixelSizeMsg struct{ W, H int }
+
 // Internal tick/event messages.
 type animTickMsg time.Time
 type moveTickMsg time.Time
@@ -95,7 +101,8 @@ type Model struct {
 	toasts  toast.Model
 	unread  map[int64]string // player id -> username with unseen DMs
 
-	termW, termH int
+	termW, termH     int
+	termPxW, termPxH int // drawable size in pixels, 0 if the client didn't report
 }
 
 // New creates the overworld for a logged-in player. env carries the shared
@@ -197,6 +204,7 @@ func (m *Model) publish() {
 
 	m.renderer.Submit(frameSnapshot{
 		termW: m.termW, termH: m.termH,
+		termPxW: m.termPxW, termPxH: m.termPxH,
 		players: players, selfID: m.player.ID,
 		chat:       append([]chat.Entry(nil), m.chat.History()...),
 		toast:      m.toasts.Message(),
@@ -237,6 +245,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termW, m.termH = msg.Width, msg.Height
+		m.publish()
+		return m, nil
+
+	case PixelSizeMsg:
+		m.termPxW, m.termPxH = msg.W, msg.H
 		m.publish()
 		return m, nil
 
@@ -318,8 +331,10 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "up", "down", "left", "right", "w", "a", "s", "d":
 		m.held[normalizeKey(key.String())] = time.Now()
 		if !m.ticking {
+			// Take the first step right now so the press feels instant; the
+			// tick chain then carries the held walk at a steady pace.
 			m.ticking = true
-			return m, moveTick()
+			return m.stepMovement()
 		}
 		return m, nil
 	}

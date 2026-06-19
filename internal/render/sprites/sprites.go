@@ -50,25 +50,22 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 	shoulderY := hipY - torsoH
 	headCY := shoulderY - headR
 
-	// Legs. While walking, alternate which leg leads so the stride reads
-	// against the moving ground.
-	lead := 0
-	if moving && frame%2 == 1 {
-		lead = 1
-	}
+	// Legs hang from a fixed hip; walking lifts a foot (the lower end) clear
+	// of the ground and sets it back down, alternating each step — so it's the
+	// feet that move, not the hips.
 	lx, rx := footX-4, footX+4
-	llen, rlen := legH, legH
+	lFoot, rFoot := footY, footY
 	if moving {
-		if lead == 0 {
-			llen, rlen = legH, legH-4
+		if frame%2 == 0 {
+			lFoot = footY - 5
 		} else {
-			llen, rlen = legH-4, legH
+			rFoot = footY - 5
 		}
 	}
-	c.FillRect(lx-legW/2, footY-llen, legW, llen, body)
-	c.FillRect(rx-legW/2, footY-rlen, legW, rlen, body)
+	c.FillRect(lx-legW/2, hipY, legW, lFoot-hipY, body)
+	c.FillRect(rx-legW/2, hipY, legW, rFoot-hipY, body)
 	// Shade the left leg's left edge for volume.
-	c.VLine(lx-legW/2, footY-llen, footY-1, shade)
+	c.VLine(lx-legW/2, hipY, lFoot-1, shade)
 
 	// Torso: a rounded block, lit on the right, shaded on the left, with a
 	// dark belt for a little definition.

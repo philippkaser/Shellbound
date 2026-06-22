@@ -38,6 +38,37 @@ Configuration is via environment variables:
 
 Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 
+### Keeping it running after you log out
+
+`make run` (and `go run`) runs in the foreground and dies when your SSH
+session ends. To keep the server up after logout — and across reboots and
+crashes — install it as a **systemd service** (as root, from the checkout):
+
+```sh
+make service     # builds the binary, installs a unit, enables + starts it
+```
+
+This generates `/etc/systemd/system/shellbound.service` from
+`deploy/shellbound.service` (filling in your checkout path), so the database
+and host key live in the checkout directory and survive restarts. Manage it
+with the usual tools:
+
+```sh
+systemctl status shellbound
+journalctl -u shellbound -f      # follow logs
+systemctl restart shellbound
+make service                     # rebuild + restart to deploy code changes
+make unservice                   # stop and remove the unit (keeps the database)
+```
+
+No systemd? Two quick alternatives that survive logout:
+
+```sh
+tmux new -d -s shellbound 'make run'    # detached tmux; reattach with: tmux attach -t shellbound
+# or, fully detached with logs to a file:
+make build && setsid ./shellbound >shellbound.log 2>&1 < /dev/null &
+```
+
 > **Note on go.sum** — this repository ships without a `go.sum`; run
 > `go mod tidy` once before the first build. If a pinned version in
 > `go.mod` has been yanked upstream, `go get <module>@latest` will move it

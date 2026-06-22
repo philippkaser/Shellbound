@@ -1,0 +1,30 @@
+[Unit]
+Description=Shellbound — a terminal MMO over SSH
+Documentation=https://github.com/philippkaser/shellbound
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# __DIR__ is substituted with your checkout path by `make service`. The
+# database (shellbound.db) and host key (./.ssh) are created under
+# WorkingDirectory, so keep it stable across restarts.
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/shellbound
+Restart=on-failure
+RestartSec=2s
+
+# Shellbound listens on :80 by default, which needs privilege. Running the
+# unit as root covers it. To run as an unprivileged user instead, drop the
+# comment markers below (and create the user):
+#   User=shellbound
+#   AmbientCapabilities=CAP_NET_BIND_SERVICE
+Environment=SHELLBOUND_ADDR=:80
+# Optional overrides:
+#   Environment=SHELLBOUND_DB=/var/lib/shellbound/shellbound.db
+#   Environment=SHELLBOUND_HOSTKEY=/var/lib/shellbound/hostkey
+#   Environment=SHELLBOUND_SIXEL=on
+#   Environment=SHELLBOUND_CELL=8x16
+
+[Install]
+WantedBy=multi-user.target

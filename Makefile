@@ -4,12 +4,12 @@ BINARY  := shellbound
 PKG     := ./cmd/shellbound
 HOSTKEY := ./.ssh/shellbound_ed25519
 
-.PHONY: build run test vet tidy hostkey clean
+.PHONY: build run test vet tidy hostkey clean service unservice
 
 build: ## Compile the server binary
 	go build -o $(BINARY) $(PKG)
 
-run: ## Run the server (generates a host key on first start)
+run: ## Run the server in the foreground (generates a host key on first start)
 	go run $(PKG)
 
 test: ## Run all unit tests
@@ -27,3 +27,18 @@ hostkey: ## Pre-generate the ed25519 host key (optional; the server self-generat
 
 clean: ## Remove build artifacts (keeps the database)
 	rm -f $(BINARY)
+
+service: build ## Install + start a systemd unit so the server survives logout & reboot (run as root)
+	sed 's#__DIR__#$(CURDIR)#g' deploy/$(BINARY).service > /etc/systemd/system/$(BINARY).service
+	systemctl daemon-reload
+	systemctl enable $(BINARY)
+	systemctl restart $(BINARY)
+	@echo "shellbound is running under systemd."
+	@echo "  status: systemctl status $(BINARY)"
+	@echo "  logs:   journalctl -u $(BINARY) -f"
+	@echo "  apply code changes: make service   (rebuilds and restarts)"
+
+unservice: ## Stop and remove the systemd unit (run as root; keeps the database)
+	-systemctl disable --now $(BINARY)
+	rm -f /etc/systemd/system/$(BINARY).service
+	systemctl daemon-reload

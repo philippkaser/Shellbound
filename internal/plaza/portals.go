@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"math"
 
+	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
 )
@@ -168,9 +169,46 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 
 	drawGroundRing(c, ax, cy, baseHue, t)
 
+	// Fountain spray: a colored crest and droplets arcing up from the pool and
+	// falling back, in the same droplet language as the plaza fountain so the
+	// two read as one family — here it's a fountain of the portal's own light.
+	drawSpray(c, ax, cy, baseHue, t)
+
 	// Name label, centered beneath, white with a black shadow for legibility.
 	lw := canvas.TextWidth(p.Name)
 	c.DrawTextShadow(ax-lw/2, cy+orbHalfH+6, p.Name, 0xFFFFFF, 0x000000)
+}
+
+// drawSpray paints the portal's fountain: a pulsing colored crest at the pool's
+// center and a handful of droplets arcing up under "gravity" and splashing back
+// down, mirroring the statue spray in tiles.go but in the portal's hue.
+func drawSpray(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
+	// Crest — a bright source blob just above the pool surface.
+	ph := anim.Phase(t, 5, 3, 0)
+	crestL := []float64{0.52, 0.62, 0.56}[ph]
+	c.FillCircle(ax, cy-4, 3, canvas.HSL(baseHue, portalSat, clampLight(crestL)))
+	c.FillCircle(ax, cy-9, 2, canvas.HSL(baseHue, portalSat, clampLight(0.60)))
+
+	const drops = 11
+	for d := 0; d < drops; d++ {
+		fd := float64(d)
+		prog := math.Mod(t*0.85+fd*0.19, 1.0) // 0..1 life of a droplet
+		dir := 1.0
+		if d%2 == 0 {
+			dir = -1.0
+		}
+		dx := int(dir * prog * (3 + fd*1.1))
+		dy := int(120 * prog * (prog - 1)) // up then back down to the pool (peak ~30px)
+		l := clampLight(0.62 - 0.18*prog)  // dim a touch as it falls
+		c.FillRect(ax+dx, cy-6+dy, orbPixel, orbPixel, canvas.HSL(baseHue, portalSat, l))
+	}
+}
+
+// AccentColor returns an on-palette color in a world's signature hue at the
+// given lightness. Portal worlds use it so their accents (blasts, pickups, exit
+// runes) match the portal and quantize cleanly onto the baked color registers.
+func AccentColor(key string, lightness float64) canvas.Color {
+	return canvas.HSL(PortalHue(key), portalSat, clampLight(lightness))
 }
 
 // GlowCenter returns the portal disc's center in canvas pixel space for the

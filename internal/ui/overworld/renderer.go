@@ -15,26 +15,21 @@ import (
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
 	"github.com/shellbound/shellbound/internal/render/light"
+	"github.com/shellbound/shellbound/internal/render/screen"
 	"github.com/shellbound/shellbound/internal/render/sprites"
 	"github.com/shellbound/shellbound/internal/render/syncwriter"
 	"github.com/shellbound/shellbound/internal/ui/chat"
 )
 
-// Render cadence and framing. The play area is a fixed pixel size, letterboxed
-// and centered in the terminal, so every player sees exactly the same slice of
-// the world no matter how large their terminal is (and per-frame Sixel
-// bandwidth stays bounded).
+// Render cadence and framing. The image is the shared fixed viewport (see
+// internal/render/screen), letterboxed and centered, so every player sees the
+// same slice of world regardless of terminal size.
 const (
 	// 20 fps is the steady cadence; wall-clock interpolation keeps motion fluid
 	// at that rate while keeping per-frame Sixel CPU/bandwidth low so the loop
 	// never falls behind a slow link. Input additionally Kick()s an out-of-band
 	// frame so a keypress shows immediately instead of waiting up to a tick.
-	renderFPS = 20
-	// viewW/viewH is the fixed play area in pixels. It's letterboxed: a bigger
-	// terminal just gets wider margins, never more world. Sized to fit a common
-	// terminal (≈80×24 at an 8×16 cell); smaller terminals clamp to what fits.
-	viewW        = 640
-	viewH        = 352
+	renderFPS    = 20
 	moveLerpTau  = 0.05 // seconds; avatar/camera easing — short so input feels tight and snappy
 	ambientLight = 0.5
 	// kickMinGap rate-limits out-of-band (input-driven) frames so a burst of
@@ -213,63 +208,15 @@ func (r *Renderer) frame() {
 	}
 }
 
-// dims returns the frame's pixel size and the top-left cell offset that centers
-// it. The image is the fixed viewW×viewH viewport, snapped down to a whole
-// number of cells so it lands on cell boundaries (which makes centering exact),
-// and clamped to what the terminal can show (one row is held free as cheap
-// insurance against a Sixel scroll). Because the target is a fixed pixel size,
-// every player sees the same world: a larger terminal only widens the margins.
-//
-// The cell size comes from the snapshot — derived from a terminal query or a
-// consistent pixel report, falling back to SHELLBOUND_CELL — and is stable
-// across window resizes, so sizing never goes briefly wrong when only the
-// column/row count changes.
-func (r *Renderer) dims(snap frameSnapshot) (pw, ph, left, top int) {
-	cols, rows := snap.termW, snap.termH
-	cw, ch := snap.cellW, snap.cellH
-	if cw < 1 {
-		cw = 8
-	}
-	if ch < 1 {
-		ch = 16
-	}
-
-	// Target the fixed viewport, but never wider/taller than the terminal can
-	// show (leaving the bottom row free).
-	imgW := viewW
-	if maxW := cols * cw; imgW > maxW {
-		imgW = maxW
-	}
-	imgH := viewH
-	if maxH := (rows - 1) * ch; imgH > maxH {
-		imgH = maxH
-	}
-	imgCols, imgRows := imgW/cw, imgH/ch // snap down to whole cells
-	if imgCols < 1 {
-		imgCols = 1
-	}
-	if imgRows < 1 {
-		imgRows = 1
-	}
-	pw, ph = imgCols*cw, imgRows*ch
-	if left = (cols - imgCols) / 2; left < 0 {
-		left = 0
-	}
-	if top = (rows - imgRows) / 2; top < 0 {
-		top = 0
-	}
-	return
-}
-
 func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) string {
-	pw, ph, left, top := r.dims(snap)
+	pw, ph, left, top := screen.Dims(snap.termW, snap.termH, snap.cellW, snap.cellH)
 	r.screen.Resize(pw, ph)
 	r.screen.Clear(canvas.Black)
 
 	if snap.termW < minTermW || snap.termH < minTermH {
 		msg := "please resize your terminal to at least 60x20"
 		r.screen.DrawText(pw/2-canvas.TextWidth(msg)/2, ph/2, msg, 0xA1A1A1)
-		return r.encode(left, top)
+		return r.place(left, top)
 	}
 
 	if r.reprime.Swap(false) {
@@ -302,7 +249,7 @@ func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) strin
 	if snap.chatOpen {
 		r.drawInputBar(snap.chatInput, pw, ph)
 	}
-	return r.encode(left, top)
+	return r.place(left, top)
 }
 
 // updateEntities reconciles the interpolation set with the snapshot and prunes
@@ -480,14 +427,9 @@ func (r *Renderer) drawInputBar(line string, pw, ph int) {
 	r.screen.FillRect(tx, y+4, 2, canvas.GlyphH, 0xFFFFFF) // caret
 }
 
-// encode positions the cursor to center the image, then appends the Sixel.
-func (r *Renderer) encode(left, top int) string {
+// place centers the image at the given cell offset and appends the Sixel.
+func (r *Renderer) place(left, top int) string {
 	r.sb.Reset()
-	r.sb.WriteString("\x1b[?25l\x1b[")
-	r.sb.WriteString(strconv.Itoa(top + 1))
-	r.sb.WriteByte(';')
-	r.sb.WriteString(strconv.Itoa(left + 1))
-	r.sb.WriteByte('H')
-	r.screen.EncodeSixel(r.sb, r.pal)
+	screen.Place(r.sb, r.screen, r.pal, left, top)
 	return r.sb.String()
 }

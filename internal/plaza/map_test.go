@@ -99,8 +99,8 @@ func TestPortalTriggers(t *testing.T) {
 		}
 		seen[p.Key] = true
 
-		// The mouth must contain its own center and be walkable.
-		ccx, ccy := p.X+PortalW/2, p.Y+PortalH-1
+		// The mouth must contain the oval's center and be walkable.
+		ccx, ccy := p.X+PortalW/2, p.Y+PortalH/2
 		if !p.TriggerContains(ccx, ccy) {
 			t.Errorf("portal %s: center (%d,%d) not in trigger", p.Key, ccx, ccy)
 		}

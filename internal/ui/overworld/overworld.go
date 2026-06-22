@@ -22,12 +22,15 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
-// Tick rates: ambient animation at 10 FPS; movement stepping at 20 Hz
-// while keys are held. The hub broadcasts at 20 Hz on its own clock.
+// Tick rates: ambient animation at 10 FPS; movement steps once per tick
+// while keys are held. The hub broadcasts at 20 Hz on its own clock. The
+// move tick is deliberately unhurried so a step reads as a clean cell-to-
+// cell hop rather than a sprint; heldWindow stays comfortably above it so
+// a held key bridges the gap between key-repeat events.
 const (
 	animTickEvery = 100 * time.Millisecond
-	moveTickEvery = 50 * time.Millisecond
-	heldWindow    = 140 * time.Millisecond
+	moveTickEvery = 90 * time.Millisecond
+	heldWindow    = 220 * time.Millisecond
 )
 
 // Minimum playable terminal size.
@@ -283,26 +286,56 @@ func normalizeKey(k string) string {
 }
 
 // stepMovement advances the avatar one step based on recently-held keys,
-// with axis-separated collision so walls let you slide along them.
+// with axis-separated collision so walls let you slide along them. A step
+// is a full cell on both axes: horizontally that is one column, vertically
+// two half-block pixel rows (py is in half-blocks). Diagonal movement is
+// intentionally disabled — when both axes are held we keep only the more
+// recently pressed one, so the avatar always travels straight along a row
+// or a column.
 func (m Model) stepMovement() (Model, tea.Cmd) {
 	now := time.Now()
-	heldDir := func(name string) bool {
+	heldAt := func(name string) (time.Time, bool) {
 		t, ok := m.held[name]
-		return ok && now.Sub(t) <= heldWindow
+		if ok && now.Sub(t) <= heldWindow {
+			return t, true
+		}
+		return time.Time{}, false
 	}
 	dx, dy := 0, 0
-	if heldDir("left") {
+	var hTime, vTime time.Time // newest press on each axis
+	note := func(t time.Time, axis *time.Time) {
+		if t.After(*axis) {
+			*axis = t
+		}
+	}
+	if t, ok := heldAt("left"); ok {
 		dx--
+		note(t, &hTime)
 	}
-	if heldDir("right") {
+	if t, ok := heldAt("right"); ok {
 		dx++
+		note(t, &hTime)
 	}
-	if heldDir("up") {
+	if t, ok := heldAt("up"); ok {
 		dy--
+		note(t, &vTime)
 	}
-	if heldDir("down") {
+	if t, ok := heldAt("down"); ok {
 		dy++
+		note(t, &vTime)
 	}
+
+	// No diagonals: keep the axis whose key was pressed most recently.
+	if dx != 0 && dy != 0 {
+		if hTime.After(vTime) {
+			dy = 0
+		} else {
+			dx = 0
+		}
+	}
+
+	// A vertical step covers a whole cell — two half-block pixel rows.
+	dy *= 2
 
 	if dx == 0 && dy == 0 {
 		// Keys released: stop the tick chain and broadcast the idle pose.

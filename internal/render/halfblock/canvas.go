@@ -40,6 +40,23 @@ func Hex(s string) Color {
 	return Color(v)
 }
 
+// Lerp linearly blends from a toward b by t (clamped to 0..1), per channel.
+// Used for soft glows that fade a tint over whatever is already drawn.
+func Lerp(a, b Color, t float64) Color {
+	if t <= 0 {
+		return a
+	}
+	if t >= 1 {
+		return b
+	}
+	mix := func(shift uint) uint8 {
+		av := float64(a >> shift & 0xFF)
+		bv := float64(b >> shift & 0xFF)
+		return uint8(av + (bv-av)*t + 0.5)
+	}
+	return RGB(mix(16), mix(8), mix(0))
+}
+
 // Glyph is one cell of the text layer. A zero Ch means "no glyph here"
 // (the pixel layer shows through). A ' ' glyph is opaque black.
 type Glyph struct {

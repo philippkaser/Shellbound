@@ -90,3 +90,23 @@ func (f *Field) At(x, y int, t float64) halfblock.Color {
 	f.cache[key] = c
 	return c
 }
+
+// Radial returns the interior color for portal-local pixel (x, y) at time t,
+// where r is the normalized distance from the oval center (0 at the core,
+// 1 at the rim). The hue still sweeps across the disc and over time, but the
+// lightness eases from a bright core out to a deeper, richer rim — so the
+// interior reads as a smooth gradient from one color to another rather than
+// a flat fill. Computed live (no cache) because it varies per pixel; an
+// oval is only a few hundred pixels per frame.
+func (f *Field) Radial(x, y int, t, r float64) halfblock.Color {
+	hue := math.Mod(float64(x)*6+float64(y)*3+t*50, 360)
+	if hue < 0 {
+		hue += 360
+	}
+	r = clamp01(r)
+	// Smootherstep so the core glow blooms gently instead of linearly.
+	e := r * r * (3 - 2*r)
+	l := 0.78 - 0.34*e
+	s := 0.82 + 0.13*e
+	return HSL(hue, s, l)
+}

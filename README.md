@@ -45,7 +45,7 @@ terminals do) and ideally use a dark/black background.
 
 | Key            | Action                                  |
 | -------------- | --------------------------------------- |
-| WASD / arrows  | Walk (hold two for diagonals)           |
+| WASD / arrows  | Walk, one cell per step (no diagonals)  |
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
 | `i`            | Inventory                               |
 | `f`            | Friends & messages                      |

@@ -30,7 +30,7 @@ const (
 	renderFPS    = 20
 	maxWorldW    = 960  // max play-area width in pixels
 	maxWorldH    = 600  // max play-area height in pixels
-	moveLerpTau  = 0.09 // seconds; avatar/camera easing time constant
+	moveLerpTau  = 0.06 // seconds; avatar/camera easing — small so input feels tight
 	ambientLight = 0.5
 )
 

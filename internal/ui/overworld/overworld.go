@@ -9,6 +9,7 @@
 package overworld
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,13 +26,14 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
-// Tick rates. Movement steps are paced for a calm, continuous walk; the held
-// window is wide enough to bridge the terminal's key-repeat delay so a held
-// key never stutters into stop-start motion.
+// Movement is event-driven: each key press steps immediately (held movement
+// rides the terminal's own key-repeat), so input feels 1:1 and stops the
+// instant you let go — no movement tick, no held-key window. The anim tick
+// only drives ambient animation and flips the walk pose back to idle a beat
+// after the last step.
 const (
 	animTickEvery = 100 * time.Millisecond
-	moveTickEvery = 90 * time.Millisecond
-	heldWindow    = 340 * time.Millisecond
+	idleAfter     = 250 * time.Millisecond // revert to idle pose this long after the last step
 )
 
 // Minimum playable terminal size.
@@ -67,7 +69,6 @@ type CellSizeMsg struct{ W, H int }
 
 // Internal tick/event messages.
 type animTickMsg time.Time
-type moveTickMsg time.Time
 type hubEventMsg struct{ ev hub.Event }
 type hubClosedMsg struct{}
 
@@ -96,9 +97,7 @@ type Model struct {
 	moving    bool
 	walkCount int
 	onPortal  bool
-
-	held    map[string]time.Time
-	ticking bool // a moveTick chain is live
+	lastMove  time.Time // when the avatar last stepped, for idle detection
 
 	remotes map[int64]hub.PlayerState
 
@@ -158,7 +157,6 @@ func New(
 		px:       px,
 		py:       py,
 		dir:      hub.DirDown,
-		held:     make(map[string]time.Time),
 		remotes:  remotes,
 		chat:     chat.New(theme),
 		inv:      inventory.New(theme),
@@ -242,10 +240,6 @@ func animTick() tea.Cmd {
 	return tea.Tick(animTickEvery, func(t time.Time) tea.Msg { return animTickMsg(t) })
 }
 
-func moveTick() tea.Cmd {
-	return tea.Tick(moveTickEvery, func(t time.Time) tea.Msg { return moveTickMsg(t) })
-}
-
 func listenHub(ch <-chan hub.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
@@ -284,13 +278,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case animTickMsg:
 		m.toasts.Tick(time.Time(msg))
+		// Flip back to the idle pose a beat after the last step, and tell peers.
+		if m.moving && time.Since(m.lastMove) > idleAfter {
+			m.moving = false
+			m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
+		}
 		m.publish()
 		return m, animTick()
-
-	case moveTickMsg:
-		next, cmd := m.stepMovement()
-		next.publish()
-		return next, cmd
 
 	case hubEventMsg:
 		next, cmd := m.applyEvent(msg.ev)
@@ -357,15 +351,13 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.friends.Open(m.handle.OnlineIDs())
 		m.unread = make(map[int64]string)
 		return m, nil
-	case "up", "down", "left", "right", "w", "a", "s", "d":
-		m.held[normalizeKey(key.String())] = time.Now()
-		if !m.ticking {
-			// Take the first step right now so the press feels instant; the
-			// tick chain then carries the held walk at a steady pace.
-			m.ticking = true
-			return m.stepMovement()
-		}
-		return m, nil
+	}
+	// Movement: step immediately on the key event itself (held movement rides
+	// the terminal's key-repeat), so it feels instant and stops the moment you
+	// release. Diagonals have dedicated keys since key-repeat only repeats the
+	// last key; Shift (or a capital letter) runs.
+	if dx, dy, run, ok := parseMove(key.String()); ok {
+		return m.step(dx, dy, run)
 	}
 	return m, nil
 }
@@ -380,65 +372,68 @@ func (m Model) updateFriends(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// normalizeKey folds WASD onto the arrow names so the held-key map has one
-// entry per direction.
-func normalizeKey(k string) string {
-	switch k {
-	case "w":
-		return "up"
-	case "s":
-		return "down"
-	case "a":
-		return "left"
-	case "d":
-		return "right"
+// parseMove maps a key string to a movement vector (dx in cells, dy in
+// half-rows) and whether to run. Cardinals are WASD/arrows, diagonals are the
+// roguelike y/u/b/n cluster, and Shift (reported as "shift+…" or an uppercase
+// letter) runs. ok is false for non-movement keys.
+func parseMove(s string) (dx, dy int, run, ok bool) {
+	if strings.HasPrefix(s, "shift+") {
+		run = true
+		s = strings.TrimPrefix(s, "shift+")
 	}
-	return k
+	lower := strings.ToLower(s)
+	if s != lower {
+		run = true // an uppercase letter means Shift was held
+	}
+	switch lower {
+	case "up", "w":
+		dy = -1
+	case "down", "s":
+		dy = 1
+	case "left", "a":
+		dx = -1
+	case "right", "d":
+		dx = 1
+	case "y":
+		dx, dy = -1, -1
+	case "u":
+		dx, dy = 1, -1
+	case "b":
+		dx, dy = -1, 1
+	case "n":
+		dx, dy = 1, 1
+	default:
+		return 0, 0, false, false
+	}
+	return dx, dy, run, true
 }
 
-// stepMovement advances the avatar one step based on recently-held keys,
-// with axis-separated collision so walls let you slide along them.
-func (m Model) stepMovement() (Model, tea.Cmd) {
-	now := time.Now()
-	heldDir := func(name string) bool {
-		t, ok := m.held[name]
-		return ok && now.Sub(t) <= heldWindow
+// step applies one movement input immediately: up to two tiles when running,
+// with axis-separated collision so walls let you slide along them. It faces
+// the direction of effort even when blocked, and fires the portal trigger on
+// entering a mouth.
+func (m Model) step(dx, dy int, run bool) (Model, tea.Cmd) {
+	tiles := 1
+	if run {
+		tiles = 2
 	}
-	dx, dy := 0, 0
-	if heldDir("left") {
-		dx--
-	}
-	if heldDir("right") {
-		dx++
-	}
-	if heldDir("up") {
-		dy--
-	}
-	if heldDir("down") {
-		dy++
-	}
-
-	if dx == 0 && dy == 0 {
-		// Keys released: stop the tick chain and broadcast the idle pose.
-		m.ticking = false
-		if m.moving {
-			m.moving = false
-			m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
-		}
-		return m, nil
-	}
-
 	moved := false
-	if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
-		m.px += dx
-		moved = true
-	}
-	if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
-		m.py += dy
+	for i := 0; i < tiles; i++ {
+		adv := false
+		if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
+			m.px += dx
+			adv = true
+		}
+		if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
+			m.py += dy
+			adv = true
+		}
+		if !adv {
+			break // ran into a wall; stop short
+		}
 		moved = true
 	}
 
-	// Face the direction of effort even when blocked.
 	switch {
 	case dx < 0:
 		m.dir = hub.DirLeft
@@ -450,30 +445,27 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 		m.dir = hub.DirDown
 	}
 
-	if moved {
-		m.walkCount++
-		m.moving = true
-		m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, true)
-
-		// Portal trigger: fires on the transition into a mouth, not while
-		// standing in one (so returning from a world doesn't re-enter).
-		if p, ok := plaza.PortalAt(m.px, m.py/2); ok {
-			if !m.onPortal {
-				m.onPortal = true
-				m.toasts.Show("✦ " + p.Name + " ✦")
-				return m, tea.Batch(moveTick(), func() tea.Msg {
-					return EnterPortalMsg{Key: p.Key, Name: p.Name}
-				})
-			}
-		} else {
-			m.onPortal = false
-		}
-	} else if m.moving {
-		// Pushing into a wall: stand still rather than pantomime walking.
-		m.moving = false
-		m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
+	if !moved {
+		return m, nil // blocked: faced the wall, didn't budge
 	}
-	return m, moveTick()
+
+	m.walkCount++
+	m.moving = true
+	m.lastMove = time.Now()
+	m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, true)
+
+	// Portal trigger: fires on entering a mouth, not while standing in one (so
+	// returning from a world doesn't immediately re-enter).
+	if p, ok := plaza.PortalAt(m.px, m.py/2); ok {
+		if !m.onPortal {
+			m.onPortal = true
+			m.toasts.Show("✦ " + p.Name + " ✦")
+			return m, func() tea.Msg { return EnterPortalMsg{Key: p.Key, Name: p.Name} }
+		}
+	} else {
+		m.onPortal = false
+	}
+	return m, nil
 }
 
 // applyEvent folds one hub event into local state.

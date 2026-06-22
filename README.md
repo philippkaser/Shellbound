@@ -54,7 +54,9 @@ everyone is shown a short "connect with a Sixel terminal" notice instead.
 
 | Key            | Action                                  |
 | -------------- | --------------------------------------- |
-| WASD / arrows  | Walk (hold two for diagonals)           |
+| WASD / arrows  | Walk (each press steps; hold to repeat) |
+| `y` `u` `b` `n`| Walk diagonally (NW / NE / SW / SE)     |
+| `Shift` + move | Run (two tiles per step)                |
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
 | `i`            | Inventory                               |
 | `f`            | Friends list (Enter to message someone) |
@@ -98,11 +100,13 @@ Enter on a name pre-fills a `/w` to them.
   terminal size; when the client reports its pixel dimensions the real cell
   size is derived from the PTY so centering is exact. The SSH layer pins
   sessions to TrueColor.
-- **Camera & motion.** Avatars step on the grid, but the renderer eases each
-  one toward its target with frame-rate-independent smoothing and centers the
-  camera on the local player, so movement glides. Held keys keep a wide window
-  open so the terminal's key-repeat delay never stutters a walk into stop-start.
-  Below 60×20 cells, a resize prompt is baked into the frame instead.
+- **Camera & motion.** Movement is event-driven: each key press steps the grid
+  position immediately and held walking rides the terminal's own key-repeat, so
+  input is 1:1 and stops the instant you release. The renderer then eases each
+  avatar toward its grid target with frame-rate-independent smoothing and keeps
+  the camera centered on the local player, so motion still glides without adding
+  input lag. Diagonals have dedicated keys (key-repeat only repeats the last
+  key); Shift runs. Below 60×20 cells, a resize prompt is baked into the frame.
 - **Multiplayer.** One in-memory hub holds all sessions. Input is local
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.

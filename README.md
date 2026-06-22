@@ -5,7 +5,7 @@ you're standing in a shared plaza: walk around, watch other players wander
 past, chat, whisper, make friends. The plaza is drawn as **isometric pixel
 art** using real terminal graphics (Sixel) — strict black-and-white, with
 exactly three splashes of color (player names, chat usernames, and each portal
-swirling as a round vortex in its world's own signature hue) and interactive lighting that
+rippling as a round pixel-art vortex in its world's own signature hue) and interactive lighting that
 follows you and pools around the lamps. Fireflies drift, birds cross overhead,
 the fountain spits droplets.
 
@@ -86,11 +86,11 @@ Enter on a name pre-fills a `/w` to them.
   (names, chat, HUD, panels) is baked with a 5×7 bitmap font so the entire frame
   composites in one place. **Interactive lighting** (`internal/render/light`)
   dims the plaza and lets the player and lamps reveal it, with blocky glow
-  halos. Each portal is a round vortex (`internal/plaza/portals.go`) — a pulsing
-  core, rotating spiral arms and rings of light travelling out to a crisp rim,
-  over a faint ground ring and a colored bloom that bleeds onto the floor. Its
-  one or two hues are derived from a hash of its world key, so a world's color
-  is stable forever.
+  halos. Each portal is a round vortex (`internal/plaza/portals.go`) drawn as
+  chunky pixel-art blocks: soft rings of light ripple outward from the core,
+  over a faint ground ring and a gentle colored bloom that bleeds onto the
+  floor. Its one or two low-saturation hues are derived from a hash of its world
+  key, so a world's color is stable forever.
 - **The render loop.** Bubble Tea's line renderer can't host a Sixel image, so
   the plaza returns a constant `View` (keeping that renderer quiescent) and a
   dedicated background goroutine (`internal/ui/overworld/renderer.go`) produces

@@ -214,6 +214,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case worldExitMsg:
 		if msg.gen == a.worldGen && a.state == stateWorld {
 			a.state = statePlaza
+			if s, ok := a.worldModel.(interface{ Stop() }); ok {
+				s.Stop() // halt the world's renderer before we drop it
+			}
 			a.worldModel = nil
 			a.over = a.over.ResumeFromWorld()
 			// Clear the world's text screen, then repaint the plaza frame.
@@ -290,13 +293,20 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 		default:
 		}
 	}
+	cw, ch := a.cellSize()
 	ctx := world.Context{
 		Player:    player,
 		Save:      world.NewSaveStore(a.deps.repos.Saves, player.ID, w.Key()),
 		Inventory: world.NewInventoryAPI(a.deps.repos.Inventory, player.ID, w.Key()),
+		Render:    world.Render{Palette: a.deps.env.Pal, Out: a.deps.env.Out, CellW: cw, CellH: ch},
 		Exit:      exit,
 	}
 	a.worldModel = w.Init(ctx)
+	// A graphical world renders on its own; stop it when the session ends so the
+	// goroutine/ticker never outlives the connection.
+	if s, ok := a.worldModel.(interface{ Stop() }); ok {
+		a.deps.onTeardown(s.Stop)
+	}
 	a.state = stateWorld
 	// The plaza must stop painting Sixel frames while the world owns the
 	// screen; clear its last frame so the world's text renders cleanly.
@@ -315,6 +325,18 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 func (a *app) overPlayer() world.PlayerInfo {
 	p := a.over.Player()
 	return world.PlayerInfo{ID: p.ID, Username: p.Username, Color: p.Color}
+}
+
+// cellSize returns the best-known terminal cell size in pixels, preferring a
+// consistent pixel report, then the CSI 16t query reply, then the env fallback.
+func (a *app) cellSize() (int, int) {
+	if a.lastPixel.W > 0 && a.lastPixel.H > 0 && a.lastPixel.Cols > 0 && a.lastPixel.Rows > 0 {
+		return max(1, a.lastPixel.W/a.lastPixel.Cols), max(1, a.lastPixel.H/a.lastPixel.Rows)
+	}
+	if a.lastCell.W > 0 && a.lastCell.H > 0 {
+		return a.lastCell.W, a.lastCell.H
+	}
+	return a.deps.env.CellW, a.deps.env.CellH
 }
 
 // leave deregisters from the hub (idempotent).

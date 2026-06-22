@@ -10,10 +10,13 @@ package world
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/shellbound/shellbound/internal/render/canvas"
 )
 
 // PlayerInfo identifies the player inside a world, without exposing
@@ -40,11 +43,22 @@ type InventoryAPI interface {
 	Grant(itemKey, name string, qty int) error
 }
 
+// Render carries the shared Sixel rendering collaborators a graphical world
+// needs: the session's fixed palette, the synchronized session writer (the
+// world writes whole Sixel frames to it, the same way the plaza does), and the
+// best-known terminal cell size in pixels. Text-only worlds can ignore it.
+type Render struct {
+	Palette      *canvas.Palette
+	Out          io.Writer
+	CellW, CellH int
+}
+
 // Context is everything a world receives when a player enters it.
 type Context struct {
 	Player    PlayerInfo
 	Save      SaveStore
 	Inventory InventoryAPI
+	Render    Render
 	// Exit returns the player to the plaza. Safe to call multiple times;
 	// calls after the first are no-ops.
 	Exit func()

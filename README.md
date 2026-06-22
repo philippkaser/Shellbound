@@ -164,17 +164,24 @@ Enter on a name pre-fills a `/w` to them.
   Connecting the same key twice hands the avatar to the newest session.
 - **Worlds.** Portals reference `world.World` implementations from a
   registry. A world receives a `Context` carrying save/inventory APIs
-  pre-bound to `(player, world key)` — it cannot touch any other slot. In
-  1.0 all three portals lead to the "coming soon" placeholder, which
-  persists a visit counter through the real save pipeline.
+  pre-bound to `(player, world key)` — it cannot touch any other slot — plus
+  a `Render` handle (the shared palette, the synchronized session writer and
+  the cell size) so a world can ship full Sixel frames exactly like the
+  plaza. The **Bomberman** portal leads to **The Vault** (`internal/worlds/
+  bomber`): a single-player bomb arena rendered in the same isometric/lit
+  Sixel style, painting its blasts and pickups in the portal's own hue, that
+  grants a *Spark Core* to your inventory when you clear it. Chess and Doom
+  are still the text "coming soon" placeholder.
 - **Persistence.** Pure-Go SQLite, single writer connection, in-code
   migrations on startup. Tables: `players`, `friends`, `dms`, `inventory`,
   `saves`.
 
 ## Roadmap
 
-- **1.x** — first real portal world (Bomberman), item grants on victory,
-  inventory that actually fills up.
+- **Done** — first real portal world (Bomberman → "The Vault"), with a
+  victory item grant through the real inventory pipeline.
+- **1.x** — more powerups and arena variety; inventory that the plaza shows
+  off; enemy behaviours.
 - **Later** — Chess (with correspondence via DMs?), the Doom portal doing
   whatever a terminal can get away with, player-placed decorations,
   moderation tools.
@@ -187,11 +194,11 @@ internal/server/     wish server, session app shell
 internal/hub/        presence + broadcast
 internal/auth/       fingerprints, username rules
 internal/storage/    sqlite, migrations, repositories
-internal/world/      World interface, registry, scoped stores
-internal/worlds/     world implementations (comingsoon)
+internal/world/      World interface, registry, scoped stores + render handle
+internal/worlds/     world implementations (bomber "The Vault", comingsoon)
 internal/plaza/      map, isometric tiles, portals
 internal/ui/         login, overworld, chat, inventory, friends, toast
-internal/render/     canvas, sixel, iso, light, sprites, syncwriter
+internal/render/     canvas, sixel, iso, light, sprites, screen, syncwriter
 internal/style/      palette, themes
 internal/anim/       camera spring, flicker helpers
 ```

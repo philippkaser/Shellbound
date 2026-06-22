@@ -19,6 +19,7 @@ import (
 	"github.com/shellbound/shellbound/internal/server"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/world"
+	"github.com/shellbound/shellbound/internal/worlds/bomber"
 	"github.com/shellbound/shellbound/internal/worlds/comingsoon"
 )
 
@@ -49,12 +50,16 @@ func main() {
 	repos := storage.NewRepos(db)
 	log.Info("database ready", "path", dbPath)
 
-	// Register the placeholder world under every portal key declared by the
-	// plaza. Shipping a real mini-game later means registering it here
-	// instead — nothing else changes.
+	// Register the worlds behind the portals. "bomberman" leads to the real
+	// arena game (The Vault); the rest are still the "coming soon" placeholder.
+	// Shipping another mini-game means registering it here — nothing else changes.
 	registry := world.NewRegistry()
 	for _, p := range plaza.Portals {
-		if err := registry.Register(comingsoon.New(p.Key, p.Name)); err != nil {
+		var w world.World = comingsoon.New(p.Key, p.Name)
+		if p.Key == "bomberman" {
+			w = bomber.New(p.Key, p.Name)
+		}
+		if err := registry.Register(w); err != nil {
 			log.Fatal("register world", "key", p.Key, "err", err)
 		}
 	}

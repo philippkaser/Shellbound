@@ -99,17 +99,18 @@ func TestPortalTriggers(t *testing.T) {
 		}
 		seen[p.Key] = true
 
-		// The mouth must contain its own center and be walkable.
-		ccx, ccy := p.X+PortalW/2, p.Y+PortalH-1
+		// The hitbox sits on the footprint center (where the disc is drawn) and
+		// must be walkable.
+		ccx, ccy := p.X+PortalW/2, p.Y+PortalH/2
 		if !p.TriggerContains(ccx, ccy) {
 			t.Errorf("portal %s: center (%d,%d) not in trigger", p.Key, ccx, ccy)
 		}
 		if m.Blocked(ccx, ccy) {
 			t.Errorf("portal %s: trigger center (%d,%d) is blocked", p.Key, ccx, ccy)
 		}
-		// Just outside must not trigger.
-		if p.TriggerContains(p.X-1, p.Y) || p.TriggerContains(p.X+PortalW, p.Y+PortalH) {
-			t.Errorf("portal %s: trigger leaks outside the arch", p.Key)
+		// Two cells out (past the 3×3) must not trigger.
+		if p.TriggerContains(ccx-2, ccy) || p.TriggerContains(ccx, ccy+2) {
+			t.Errorf("portal %s: trigger reaches too far from the disc", p.Key)
 		}
 
 		got, ok := PortalAt(ccx, ccy)

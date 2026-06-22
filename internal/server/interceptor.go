@@ -7,28 +7,37 @@ import "io"
 // terminals don't report pixel dimensions over SSH, so this direct query is
 // the most reliable way to learn the real cell size and center the Sixel image.
 //
-// It only ever inspects the very first read and strips a complete response
-// from it; every read after that is a pure passthrough, so it can never
-// corrupt steady-state keyboard input.
+// It inspects only the first few reads (the reply can arrive a packet after the
+// first read, so checking just one is too fragile) and strips the response when
+// found; once found — or after maxScans reads — every read is a pure
+// passthrough, so it can never corrupt steady-state keyboard input.
 type cellSizeReader struct {
-	src    io.Reader
-	onCell func(w, h int)
-	done   bool
+	src     io.Reader
+	onCell  func(w, h int)
+	done    bool
+	scanned int
 }
+
+// maxScans bounds how many early reads are inspected for the reply before the
+// reader gives up and becomes a plain passthrough.
+const maxScans = 8
 
 func (r *cellSizeReader) Read(p []byte) (int, error) {
 	if r.done {
 		return r.src.Read(p)
 	}
-	r.done = true // inspect only the first read
 	n, err := r.src.Read(p)
 	if n <= 0 {
 		return n, err
+	}
+	if r.scanned++; r.scanned >= maxScans {
+		r.done = true // stop looking; never inspect steady-state input
 	}
 	w, h, lo, hi, ok := findCellResponse(p[:n])
 	if !ok {
 		return n, err
 	}
+	r.done = true // found it; stop inspecting
 	if r.onCell != nil && w > 0 && h > 0 {
 		r.onCell(w, h)
 	}

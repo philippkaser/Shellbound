@@ -116,11 +116,15 @@ func clampLight(l float64) float64 {
 	return l
 }
 
-// TriggerContains reports whether feet at cell (cx, cy) are inside the portal
-// mouth (the central region of the footprint).
+// TriggerContains reports whether feet at cell (cx, cy) are on the portal — the
+// 3×3 of cells centered on the footprint center, which is exactly where the
+// glowing disc is drawn (RenderIso centers it on Center()). Keeping the hitbox
+// aligned with the visible disc means you enter when you step onto it, not from
+// a tile away.
 func (p Portal) TriggerContains(cx, cy int) bool {
-	return cx >= p.X+2 && cx <= p.X+PortalW-3 &&
-		cy >= p.Y+2 && cy <= p.Y+PortalH-1
+	ccx, ccy := p.X+PortalW/2, p.Y+PortalH/2
+	dx, dy := cx-ccx, cy-ccy
+	return dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1
 }
 
 // Center returns the portal's footprint center cell (fractional).

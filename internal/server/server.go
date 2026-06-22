@@ -143,28 +143,40 @@ func (s *Server) bubbleteaMiddleware(next ssh.Handler) ssh.Handler {
 			next(sess)
 			return
 		}
-		_, windowChanges, ok := sess.Pty()
+		pty, windowChanges, ok := sess.Pty()
 		if !ok {
 			wish.Fatalln(sess, "no active terminal, skipping")
 			return
 		}
 		ctx, cancel := context.WithCancel(sess.Context())
 		go func() {
+			// Seed the initial size right away. The pty-req carries the terminal's
+			// pixel dimensions for most Sixel terminals (WezTerm, foot, …), and a
+			// stable session may never emit a window-change, so without this the
+			// cell size would be stuck on the SHELLBOUND_CELL fallback and the
+			// Sixel image would center against the wrong cell geometry.
+			seed := func(w ssh.Window) {
+				if w.Width <= 0 || w.Height <= 0 {
+					return
+				}
+				prog.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+				if w.WidthPixels > 0 && w.HeightPixels > 0 {
+					// Carry cols/rows with the pixels so the cell size is derived
+					// from one consistent pair.
+					prog.Send(overworld.PixelSizeMsg{
+						Cols: w.Width, Rows: w.Height,
+						W: w.WidthPixels, H: w.HeightPixels,
+					})
+				}
+			}
+			seed(pty.Window)
 			for {
 				select {
 				case <-ctx.Done():
 					prog.Quit()
 					return
 				case w := <-windowChanges:
-					prog.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
-					if w.WidthPixels > 0 && w.HeightPixels > 0 {
-						// Carry cols/rows with the pixels so the cell size is
-						// derived from one consistent pair.
-						prog.Send(overworld.PixelSizeMsg{
-							Cols: w.Width, Rows: w.Height,
-							W: w.WidthPixels, H: w.HeightPixels,
-						})
-					}
+					seed(w)
 				}
 			}
 		}()

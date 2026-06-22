@@ -205,7 +205,10 @@ func (r *Renderer) frame() {
 	r.last = now
 	t := now.Sub(r.start).Seconds()
 
-	if out := r.build(snap, dt, t, now); out != "" {
+	out := r.build(snap, dt, t, now)
+	// Re-check active after the (slow) encode: if a portal world took over while
+	// we were building, drop this frame so it can't paint over the world's text.
+	if out != "" && r.active.Load() {
 		_, _ = r.out.WriteString(out)
 	}
 }

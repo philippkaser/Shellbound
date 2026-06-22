@@ -41,33 +41,39 @@ Other targets: `make build`, `make test`, `make vet`, `make hostkey`.
 ### Keeping it running after you log out
 
 `make run` (and `go run`) runs in the foreground and dies when your SSH
-session ends. To keep the server up after logout — and across reboots and
-crashes — install it as a **systemd service** (as root, from the checkout):
+session ends. To choose how to run it — and keep it up after logout — use
+the launcher:
 
 ```sh
-make service     # builds the binary, installs a unit, enables + starts it
+./scripts/run.sh          # interactive menu; default keeps it running, no service
 ```
 
-This generates `/etc/systemd/system/shellbound.service` from
-`deploy/shellbound.service` (filling in your checkout path), so the database
-and host key live in the checkout directory and survive restarts. Manage it
-with the usual tools:
+The default (option 1) builds the binary and starts it **detached** with
+`nohup`, so it survives logout without installing anything system-wide. It
+writes `./shellbound.log` and a `./shellbound.pid`. Drive it directly too:
 
 ```sh
+make start     # background, survives logout (no service)   ← the default
+make status    # is it running?
+make logs      # follow the log
+make stop      # stop it
+make run       # foreground (dev; stops on logout)
+```
+
+If you'd rather have it managed — surviving reboots and auto-restarting on
+crash — install it as a **systemd service** (as root, from the checkout):
+
+```sh
+make service     # builds, installs a unit (from deploy/shellbound.service), enables + starts it
 systemctl status shellbound
 journalctl -u shellbound -f      # follow logs
-systemctl restart shellbound
 make service                     # rebuild + restart to deploy code changes
 make unservice                   # stop and remove the unit (keeps the database)
 ```
 
-No systemd? Two quick alternatives that survive logout:
-
-```sh
-tmux new -d -s shellbound 'make run'    # detached tmux; reattach with: tmux attach -t shellbound
-# or, fully detached with logs to a file:
-make build && setsid ./shellbound >shellbound.log 2>&1 < /dev/null &
-```
+No systemd and prefer a terminal multiplexer? `tmux new -d -s shellbound
+'make run'` also survives logout (reattach with `tmux attach -t
+shellbound`).
 
 > **Note on go.sum** — this repository ships without a `go.sum`; run
 > `go mod tidy` once before the first build. If a pinned version in

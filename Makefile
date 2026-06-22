@@ -4,13 +4,25 @@ BINARY  := shellbound
 PKG     := ./cmd/shellbound
 HOSTKEY := ./.ssh/shellbound_ed25519
 
-.PHONY: build run test vet tidy hostkey clean service unservice
+.PHONY: build run start stop status logs test vet tidy hostkey clean service unservice
 
 build: ## Compile the server binary
 	go build -o $(BINARY) $(PKG)
 
 run: ## Run the server in the foreground (generates a host key on first start)
 	go run $(PKG)
+
+start: ## Start detached so it survives logout (no service); pick a mode with ./scripts/run.sh
+	./scripts/run.sh start
+
+stop: ## Stop the detached server
+	./scripts/run.sh stop
+
+status: ## Show whether the detached server is running
+	./scripts/run.sh status
+
+logs: ## Follow the detached server's log
+	./scripts/run.sh logs
 
 test: ## Run all unit tests
 	go test ./...

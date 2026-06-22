@@ -6,19 +6,23 @@ import (
 
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
-	"github.com/shellbound/shellbound/internal/render/light"
 )
 
-// Portal geometry: footprint in cells, glowing disc in pixels. The portal is a
-// round vortex of chunky pixels that floats above a faint ground ring.
+// Portal geometry: footprint in cells, glowing disc in pixels. The portal lies
+// in the isometric ground plane as a 2:1 ellipse (half-height is half the
+// half-width, matching the tile diamonds) so it sits in the world rather than
+// facing the camera as a flat circle.
 const (
 	PortalW = 10
 	PortalH = 6
 
-	orbRadius  = 30 // vortex disc radius in pixels
-	orbFloat   = 12 // gap between the disc bottom and the ground ring
-	haloRadius = 46 // colored bloom that bleeds onto the surrounding floor
-	orbPixel   = 3  // size of one chunky "pixel" block, for a pixel-art look
+	orbHalfW = 30 // disc half-width in pixels
+	orbHalfH = 15 // disc half-height (2:1 iso ellipse)
+	orbPixel = 2  // size of one chunky "pixel" block, for a pixel-art look
+
+	// Soft colored bloom on the floor around the gateway (also a 2:1 ellipse).
+	haloHalfW = 56
+	haloHalfH = 28
 )
 
 // Wave shaping: rings of light ripple outward from the core. The portal reads
@@ -32,15 +36,18 @@ const (
 )
 
 // Portal color discipline: each portal has a signature hue derived from its
-// world key, and the vortex breathes between that hue and a single nearby
-// accent — one or two soft colors, never the full rainbow. Saturation is kept
-// low so the glow is gentle, not neon.
+// world key, and the vortex breathes across that hue and a single nearby accent
+// — one or two soft colors, never the full rainbow. Saturation is kept low so
+// the glow is gentle, not neon. The hue is baked at several intermediate steps
+// and the lightness in a fine ramp, so the wave's color transitions read smooth
+// rather than as two hard bands.
 const (
 	portalSat         = 0.55
-	portalAccentDelta = 22.0  // degrees from the base hue to the accent hue
-	portalRampLevels  = 12    // lightness steps baked per hue into the palette
-	portalLightMin    = 0.18  // darkest baked shimmer level
-	portalLightStep   = 0.045 // lightness gap between baked levels
+	portalAccentDelta = 18.0 // degrees of gentle hue drift across the wave
+	portalHueSteps    = 4    // baked hue stops between base and accent
+	portalRampLevels  = 10   // lightness steps baked per hue into the palette
+	portalLightMin    = 0.18 // darkest baked shimmer level
+	portalLightStep   = 0.05 // lightness gap between baked levels
 )
 
 // Portal is one gateway in the plaza referencing a world by key. X, Y is the
@@ -72,7 +79,8 @@ func PaletteAccents() []canvas.Color {
 	var out []canvas.Color
 	for _, p := range Portals {
 		base := PortalHue(p.Key)
-		for _, hue := range []float64{base, base + portalAccentDelta} {
+		for s := 0; s < portalHueSteps; s++ {
+			hue := base + portalAccentDelta*float64(s)/float64(portalHueSteps-1)
 			for i := 0; i < portalRampLevels; i++ {
 				l := portalLightMin + float64(i)*portalLightStep
 				out = append(out, canvas.HSL(hue, portalSat, l))
@@ -84,15 +92,13 @@ func PaletteAccents() []canvas.Color {
 
 // orbShade returns the vortex color for a disc block at normalized radius nd
 // (0 at the core, 1 at the rim) at time t. A single sine wave travels outward
-// from the core, so the portal reads as soft concentric ripples; alternate
-// ring bands tint toward the accent hue, and the body fades gently to the rim.
+// from the core, so the portal reads as soft concentric ripples; the hue drifts
+// continuously with the wave (for smooth transitions) and the body fades gently
+// toward the rim.
 func orbShade(baseHue, nd, t float64) canvas.Color {
 	// Concentric wave: the crest moves outward as t grows.
 	wave := math.Sin(nd*waveFreq - t*waveSpeed)
-	hue := baseHue
-	if wave > 0 {
-		hue = baseHue + portalAccentDelta
-	}
+	hue := baseHue + portalAccentDelta*(0.5+0.5*wave) // continuous drift, not a hard band
 	l := orbLightMid + waveAmp*wave - orbRadialFade*nd
 	return canvas.HSL(hue, portalSat, clampLight(l))
 }
@@ -122,38 +128,31 @@ func (p Portal) Center() (float64, float64) {
 	return float64(p.X) + float64(PortalW)/2, float64(p.Y) + float64(PortalH)/2
 }
 
-// RenderIso draws the portal as a round, glowing vortex floating over a faint
-// ground ring, with the name baked beneath. (originSx, originSy) is the
-// screen-space point at the canvas's top-left.
+// RenderIso draws the portal as a glowing vortex lying in the isometric ground
+// plane (a 2:1 ellipse), with a soft colored bloom spilling onto the floor and
+// the name baked beneath. (originSx, originSy) is the screen-space point at the
+// canvas's top-left.
 func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 	baseHue := PortalHue(p.Key)
-	cgx, cgy := p.Center()
-	sx, sy := iso.Project(cgx, cgy)
-	ax := int(sx - originSx)
-	groundY := int(sy-originSy) + iso.HH
+	ax, cy := p.GlowCenter(originSx, originSy)
 
-	// The disc bobs gently and floats above the ground ring.
-	bob := int(math.Round(2 * math.Sin(t*1.6)))
-	cy := groundY - orbRadius - orbFloat + bob
+	// Soft colored bloom washing onto the surrounding floor — a 2:1 iso ellipse
+	// with a smooth falloff, so the portal glows gently into the plaza along the
+	// ground like the lamps do, with no hard edge.
+	softGlow(c, ax, cy, haloHalfW, haloHalfH, canvas.HSL(baseHue, portalSat, 0.30))
 
-	drawGroundRing(c, ax, groundY, baseHue, t)
-
-	// Soft colored bloom that bleeds onto the (otherwise dimmed) floor around
-	// the gateway, so the portal glows into the plaza like the lamps do.
-	light.Glow(c, ax, cy, haloRadius, canvas.HSL(baseHue, portalSat, 0.42))
-
-	// The vortex disc, drawn as chunky orbPixel-sized blocks so it sits in the
-	// same pixel-art register as the sprites and tiles rather than as a smooth
-	// gradient. Each block is shaded by its center sample.
-	r2 := orbRadius * orbRadius
-	for by := -orbRadius; by <= orbRadius; by += orbPixel {
-		for bx := -orbRadius; bx <= orbRadius; bx += orbPixel {
-			scx, scy := bx+orbPixel/2, by+orbPixel/2 // block center
-			d2 := scx*scx + scy*scy
-			if d2 > r2 {
+	// The vortex itself: an iso ground ellipse of chunky orbPixel blocks so it
+	// sits in the same pixel-art register as the sprites and tiles. Each block
+	// is shaded by its center sample; nd is the elliptical (world-circular)
+	// distance so the ripples read as concentric circles on the floor.
+	for by := -orbHalfH; by <= orbHalfH; by += orbPixel {
+		for bx := -orbHalfW; bx <= orbHalfW; bx += orbPixel {
+			nx := float64(bx+orbPixel/2) / orbHalfW
+			ny := float64(by+orbPixel/2) / orbHalfH
+			nd := math.Sqrt(nx*nx + ny*ny)
+			if nd > 1 {
 				continue
 			}
-			nd := math.Sqrt(float64(d2)) / float64(orbRadius)
 			col := orbShade(baseHue, nd, t)
 			for yy := 0; yy < orbPixel; yy++ {
 				for xx := 0; xx < orbPixel; xx++ {
@@ -163,26 +162,55 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 		}
 	}
 
+	drawGroundRing(c, ax, cy, baseHue, t)
+
 	// Name label, centered beneath, white with a black shadow for legibility.
 	lw := canvas.TextWidth(p.Name)
-	c.DrawTextShadow(ax-lw/2, groundY+5, p.Name, 0xFFFFFF, 0x000000)
+	c.DrawTextShadow(ax-lw/2, cy+orbHalfH+6, p.Name, 0xFFFFFF, 0x000000)
 }
 
-// drawGroundRing paints the faint, breathing iso-ellipse the vortex hovers
-// over — a 2:1 ring of chunky blocks in the portal's hue that anchors it to
-// the floor.
-func drawGroundRing(c *canvas.Canvas, ax, groundY int, baseHue, t float64) {
-	rx := float64(orbRadius + 5)
-	ry := rx / 2
-	l := clampLight(0.30 + 0.05*math.Sin(t*2))
+// GlowCenter returns the portal disc's center in canvas pixel space for the
+// given camera origin. The lighting pass uses it to softly illuminate the
+// surrounding floor, so the portal reveals the plaza around it like a lamp.
+func (p Portal) GlowCenter(originSx, originSy float64) (int, int) {
+	cgx, cgy := p.Center()
+	sx, sy := iso.Project(cgx, cgy)
+	return int(sx - originSx), int(sy-originSy) + iso.HH
+}
+
+// drawGroundRing paints a faint, breathing rim around the disc's edge — a 2:1
+// iso ellipse of chunky blocks that crisply defines the gateway's mouth.
+func drawGroundRing(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
+	rx, ry := float64(orbHalfW), float64(orbHalfH)
+	l := clampLight(0.40 + 0.08*math.Sin(t*2))
 	col := canvas.HSL(baseHue, portalSat, l)
-	const steps = 80
+	const steps = 96
 	for i := 0; i < steps; i++ {
 		a := float64(i) / steps * 2 * math.Pi
-		// Snap to the chunky pixel grid so the ring matches the disc's blocks.
+		// Snap to the chunky pixel grid so the rim matches the disc's blocks.
 		x := ax + (int(rx*math.Cos(a))/orbPixel)*orbPixel
-		y := groundY + (int(ry*math.Sin(a))/orbPixel)*orbPixel
+		y := cy + (int(ry*math.Sin(a))/orbPixel)*orbPixel
 		c.FillRect(x, y, orbPixel, orbPixel, col)
+	}
+}
+
+// softGlow adds a smooth additive bloom over a 2:1 ellipse around (cx, cy),
+// brightest at the center and fading to nothing at the rim with a quadratic
+// falloff (no dither), so the portal's color washes gently onto the floor.
+func softGlow(c *canvas.Canvas, cx, cy, halfW, halfH int, core canvas.Color) {
+	for dy := -halfH; dy <= halfH; dy++ {
+		ny := float64(dy) / float64(halfH)
+		yy := cy + dy
+		for dx := -halfW; dx <= halfW; dx++ {
+			nx := float64(dx) / float64(halfW)
+			d := nx*nx + ny*ny
+			if d >= 1 {
+				continue
+			}
+			k := (1 - d) * (1 - d) // smooth, edge-soft falloff
+			xx := cx + dx
+			c.Set(xx, yy, c.At(xx, yy).Lighten(core.Scale(k)))
+		}
 	}
 }
 

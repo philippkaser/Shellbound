@@ -361,6 +361,16 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 		glows = append(glows, glowSpec{hx, hy, k})
 	}
 
+	// Each portal sheds a soft, steady light onto the floor around it so it
+	// glows into the environment (the colored bloom is painted in RenderIso).
+	for _, p := range plaza.Portals {
+		gx, gy := p.GlowCenter(originSx, originSy)
+		if gx < -150 || gx > pw+150 || gy < -150 || gy > ph+150 {
+			continue
+		}
+		lights = append(lights, light.Light{X: gx, Y: gy, Radius: 110, Power: 0.4})
+	}
+
 	r.lights.Apply(r.screen, lights, ambientLight)
 
 	// The player carries light (added above) but no glowing disc — only the

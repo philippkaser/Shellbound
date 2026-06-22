@@ -1,15 +1,11 @@
-package shimmer
+package canvas
 
-import (
-	"testing"
-
-	"github.com/shellbound/shellbound/internal/render/halfblock"
-)
+import "testing"
 
 func TestHSLPrimaries(t *testing.T) {
 	cases := []struct {
 		h, s, l float64
-		want    halfblock.Color
+		want    Color
 	}{
 		{0, 1, 0.5, 0xFF0000},   // red
 		{120, 1, 0.5, 0x00FF00}, // green
@@ -22,8 +18,7 @@ func TestHSLPrimaries(t *testing.T) {
 		{123, 0, 0.5, 0x808080}, // grey regardless of hue
 	}
 	for _, tc := range cases {
-		got := HSL(tc.h, tc.s, tc.l)
-		if got != tc.want {
+		if got := HSL(tc.h, tc.s, tc.l); got != tc.want {
 			t.Errorf("HSL(%v,%v,%v) = %06X, want %06X", tc.h, tc.s, tc.l, uint32(got), uint32(tc.want))
 		}
 	}
@@ -50,26 +45,15 @@ func TestHSLClampsSatLight(t *testing.T) {
 	}
 }
 
-func TestFieldDeterministicAndAnimated(t *testing.T) {
-	f := NewField()
-	a := f.At(3, 2, 1.0)
-	b := f.At(3, 2, 1.0)
-	if a != b {
-		t.Error("Field.At not deterministic for same inputs")
+func TestColorGrayAndScale(t *testing.T) {
+	if !RGB(0x40, 0x40, 0x40).IsGray() {
+		t.Error("equal channels should be grey")
 	}
-	// Over a half rotation the hue must change the color.
-	c := f.At(3, 2, 4.0)
-	if a == c {
-		t.Error("Field.At should animate over time")
+	if Hex("#FF5FAF").IsGray() {
+		t.Error("saturated color should not be grey")
 	}
-}
-
-func TestFieldCacheConsistent(t *testing.T) {
-	f := NewField()
-	// Same effective hue from different coordinates must give same color.
-	a := f.At(0, 0, 0) // hue 0
-	b := f.At(45, 0, 0) // hue 360 -> 0
-	if a != b {
-		t.Errorf("equivalent hues differ: %06X vs %06X", uint32(a), uint32(b))
+	// Scaling a grey stays grey (keeps lighting on the quantizer fast path).
+	if g := RGB(200, 200, 200).Scale(0.5); !g.IsGray() {
+		t.Errorf("scaled grey is no longer grey: %06X", uint32(g))
 	}
 }

@@ -1,11 +1,15 @@
 // Package server hosts the SSH endpoint: a Wish server that authenticates
-// by public key only, hands every session a bubbletea program, and tears
-// down hub presence when the connection ends (gracefully or not).
+// by public key only, hands every session a bubbletea program wired to ship
+// Sixel graphics, and tears down hub presence when the connection ends
+// (gracefully or not).
 package server
 
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,16 +18,17 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/activeterm"
-	bm "github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
 	"github.com/muesli/termenv"
 
 	"github.com/shellbound/shellbound/internal/auth"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
-	"github.com/shellbound/shellbound/internal/render/halfblock"
+	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/syncwriter"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
+	"github.com/shellbound/shellbound/internal/ui/overworld"
 	"github.com/shellbound/shellbound/internal/world"
 )
 
@@ -41,7 +46,7 @@ type Server struct {
 	cfg      Config
 	ssh      *ssh.Server
 	plazaMap *plaza.Map
-	base     *halfblock.Canvas
+	pal      *canvas.Palette // shared Sixel palette (read-only across sessions)
 
 	// teardowns holds per-session cleanup funcs (close internal channels,
 	// etc.) run by the cleanup middleware after the program exits.
@@ -49,17 +54,22 @@ type Server struct {
 	teardowns map[string][]func()
 }
 
-// New builds the server: it loads and pre-renders the plaza once (shared,
-// read-only across sessions) and assembles the middleware chain.
+// New builds the server: it loads the plaza once and assembles the shared
+// Sixel palette and middleware chain.
 func New(cfg Config) (*Server, error) {
 	plazaMap := plaza.Load()
-	base := halfblock.New(plazaMap.W, plazaMap.H)
-	plazaMap.RenderBase(base)
+
+	// The palette's only saturated registers are the per-portal shimmer ramps
+	// and the curated player colors; everything else is the grey ramp.
+	accents := plaza.PaletteAccents()
+	for _, hex := range style.Palette {
+		accents = append(accents, canvas.Hex(hex))
+	}
 
 	s := &Server{
 		cfg:       cfg,
 		plazaMap:  plazaMap,
-		base:      base,
+		pal:       canvas.DefaultPalette(accents),
 		teardowns: make(map[string][]func()),
 	}
 
@@ -72,7 +82,7 @@ func New(cfg Config) (*Server, error) {
 		}),
 		wish.WithMiddleware(
 			// Innermost first; wish runs the list back-to-front.
-			bm.MiddlewareWithColorProfile(s.teaHandler, termenv.TrueColor),
+			s.bubbleteaMiddleware,
 			s.cleanupMiddleware,
 			activeterm.Middleware(),
 			logging.Middleware(),
@@ -122,39 +132,143 @@ func (s *Server) cleanupMiddleware(next ssh.Handler) ssh.Handler {
 	}
 }
 
-// teaHandler builds the per-session bubbletea model.
-func (s *Server) teaHandler(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+// bubbleteaMiddleware runs each session's program and feeds it window-change
+// events. Unlike wish's stock middleware it also forwards the terminal's pixel
+// dimensions (when the client reports them) so the renderer can size and
+// center the Sixel image exactly.
+func (s *Server) bubbleteaMiddleware(next ssh.Handler) ssh.Handler {
+	return func(sess ssh.Session) {
+		prog := s.programHandler(sess)
+		if prog == nil {
+			next(sess)
+			return
+		}
+		_, windowChanges, ok := sess.Pty()
+		if !ok {
+			wish.Fatalln(sess, "no active terminal, skipping")
+			return
+		}
+		ctx, cancel := context.WithCancel(sess.Context())
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					prog.Quit()
+					return
+				case w := <-windowChanges:
+					prog.Send(tea.WindowSizeMsg{Width: w.Width, Height: w.Height})
+					if w.WidthPixels > 0 && w.HeightPixels > 0 {
+						// Carry cols/rows with the pixels so the cell size is
+						// derived from one consistent pair.
+						prog.Send(overworld.PixelSizeMsg{
+							Cols: w.Width, Rows: w.Height,
+							W: w.WidthPixels, H: w.HeightPixels,
+						})
+					}
+				}
+			}
+		}()
+		if _, err := prog.Run(); err != nil {
+			log.Error("app exit with error", "error", err)
+		}
+		// Force-kill if still running and restore the terminal after a crash.
+		prog.Kill()
+		cancel()
+		next(sess)
+	}
+}
 
-	// Styles must come from a session-bound renderer; we force TrueColor to
-	// match both the middleware profile and the canvas's raw RGB output.
+// programHandler builds the per-session bubbletea program. Crucially it sets
+// the program output to a synchronized writer over the session, so the plaza's
+// own Sixel frame loop and bubbletea's renderer share one serialized stream.
+func (s *Server) programHandler(sess ssh.Session) *tea.Program {
+	// A session-bound renderer forced to TrueColor — both for lipgloss text
+	// (login, panels-in-worlds) and to match the canvas's raw RGB output.
 	renderer := lipgloss.NewRenderer(sess, termenv.WithProfile(termenv.TrueColor))
 	theme := style.NewTheme(renderer)
+
+	out := syncwriter.New(sess)
+	// Wrap input so we can capture the terminal's cell-size reply (CSI 16 t).
+	csr := &cellSizeReader{src: sess}
+	baseOpts := []tea.ProgramOption{tea.WithInput(csr), tea.WithOutput(out), tea.WithAltScreen()}
+	notice := func(text string) *tea.Program {
+		return tea.NewProgram(newNoticeModel(theme, text), baseOpts...)
+	}
 
 	fp, err := auth.Fingerprint(sess.PublicKey())
 	if err != nil {
 		log.Warn("session without public key", "remote", sess.RemoteAddr())
-		return newNoticeModel(theme, "no public key presented — shellbound identifies you by your ssh key"), opts
+		return notice("no public key presented — shellbound identifies you by your ssh key")
+	}
+
+	if !sixelEnabled() {
+		return notice("Shellbound now renders with Sixel graphics.\r\n\r\n" +
+			"Please connect from a Sixel-capable terminal — e.g. WezTerm, foot, " +
+			"mlterm, Windows Terminal, or `xterm -ti vt340`.")
 	}
 
 	player, err := s.cfg.Repos.Players.ByFingerprint(fp)
 	if err != nil {
 		log.Error("player lookup failed", "fingerprint", fp, "err", err)
-		return newNoticeModel(theme, "storage trouble — please try again in a moment"), opts
+		return notice("storage trouble — please try again in a moment")
 	}
 
+	cw, ch := cellSize()
 	sid := sess.Context().SessionID()
 	a := newApp(appDeps{
 		hub:       s.cfg.Hub,
 		repos:     s.cfg.Repos,
 		registry:  s.cfg.Registry,
 		plazaMap:  s.plazaMap,
-		base:      s.base,
+		env:       overworld.Env{Pal: s.pal, Out: out, CellW: cw, CellH: ch},
 		sessionID: sid,
 		onTeardown: func(fn func()) {
 			s.addTeardown(sid, fn)
 		},
 	}, theme, fp, player)
 	log.Info("session started", "fingerprint", fp, "known", player != nil)
-	return a, opts
+
+	prog := tea.NewProgram(a, baseOpts...)
+	// Ask the terminal for its cell size; the reply is captured by csr and
+	// fed back as a CellSizeMsg so the renderer can center the image exactly.
+	csr.onCell = func(w, h int) { prog.Send(overworld.CellSizeMsg{W: w, H: h}) }
+	_, _ = out.WriteString("\x1b[16t")
+	return prog
+}
+
+// sixelEnabled reports whether to serve the Sixel renderer. Auto-detecting
+// Sixel support over the SSH/bubbletea input path is unreliable, so this is an
+// explicit deployment switch: SHELLBOUND_SIXEL=off serves the notice screen to
+// everyone; anything else (the default) serves graphics.
+func sixelEnabled() bool {
+	switch strings.ToLower(os.Getenv("SHELLBOUND_SIXEL")) {
+	case "off", "0", "false", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// cellSize returns the assumed terminal cell size in pixels, overridable with
+// SHELLBOUND_CELL="WxH". The frame is sized to the cell grid times this, so a
+// value close to the client's real cell size makes the image fill the window.
+func cellSize() (int, int) {
+	// Conservative defaults: under-estimating a client's real cell size only
+	// letterboxes the image, whereas over-estimating makes it taller than the
+	// screen and scroll. Tune up with SHELLBOUND_CELL to fill the window.
+	const defW, defH = 8, 16
+	v := os.Getenv("SHELLBOUND_CELL")
+	if v == "" {
+		return defW, defH
+	}
+	parts := strings.SplitN(strings.ToLower(v), "x", 2)
+	if len(parts) != 2 {
+		return defW, defH
+	}
+	w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+		return defW, defH
+	}
+	return w, h
 }

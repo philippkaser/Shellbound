@@ -1,6 +1,11 @@
 // Package overworld is the heart of the client experience: the plaza
 // renderer, movement and input handling, multiplayer presence, chat and
 // the panel overlays. One Model exists per SSH session.
+//
+// Rendering is decoupled: the Model runs game logic and, whenever state
+// changes, publishes a cheap snapshot to a background Renderer (renderer.go)
+// that produces smooth, interpolated Sixel frames on its own clock. The heavy
+// encode therefore never blocks bubbletea's input loop.
 package overworld
 
 import (
@@ -9,11 +14,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
-	"github.com/shellbound/shellbound/internal/render/halfblock"
-	"github.com/shellbound/shellbound/internal/render/shimmer"
+	"github.com/shellbound/shellbound/internal/render/canvas"
+	"github.com/shellbound/shellbound/internal/render/syncwriter"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
 	"github.com/shellbound/shellbound/internal/ui/chat"
@@ -22,12 +26,14 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
-// Tick rates: ambient animation at 10 FPS; movement stepping at 20 Hz
-// while keys are held. The hub broadcasts at 20 Hz on its own clock.
+// Movement is event-driven: each key press steps immediately (held movement
+// rides the terminal's own key-repeat), so input feels 1:1 and stops the
+// instant you let go — no movement tick, no held-key window. The anim tick
+// only drives ambient animation and flips the walk pose back to idle a beat
+// after the last step.
 const (
 	animTickEvery = 100 * time.Millisecond
-	moveTickEvery = 50 * time.Millisecond
-	heldWindow    = 140 * time.Millisecond
+	idleAfter     = 250 * time.Millisecond // revert to idle pose this long after the last step
 )
 
 // Minimum playable terminal size.
@@ -48,20 +54,42 @@ type DisconnectMsg struct {
 	Reason string
 }
 
+// PixelSizeMsg carries the terminal's cell grid AND drawable pixels together
+// (from the SSH pty-req / window-change), so the cell size can be derived from
+// a single consistent pair. Sent only when the client reports pixel
+// dimensions. Carrying both avoids the resize race where cols/rows update
+// before pixels and the derived cell size is briefly — and destructively —
+// wrong.
+type PixelSizeMsg struct{ Cols, Rows, W, H int }
+
+// CellSizeMsg carries the terminal's character cell size in pixels, obtained
+// by querying the terminal directly (CSI 16 t). It's the most reliable source
+// of cell size — many terminals don't report pixel dimensions over SSH.
+type CellSizeMsg struct{ W, H int }
+
 // Internal tick/event messages.
 type animTickMsg time.Time
-type moveTickMsg time.Time
 type hubEventMsg struct{ ev hub.Event }
 type hubClosedMsg struct{}
+
+// Env carries the per-session rendering collaborators the server builds once
+// and hands to every overworld: the shared Sixel palette, the synchronized
+// session writer, and the probed terminal cell size in pixels.
+type Env struct {
+	Pal          *canvas.Palette
+	Out          *syncwriter.Writer
+	CellW, CellH int
+}
 
 // Model is the per-session overworld state.
 type Model struct {
 	theme  style.Theme
 	world  *plaza.Map
-	base   *halfblock.Canvas // shared, read-only static plaza
 	repos  *storage.Repos
 	player storage.Player
 	handle *hub.Handle
+
+	renderer *Renderer
 
 	// Local avatar: feet position as (cell column, half-block pixel row).
 	px, py    int
@@ -69,10 +97,7 @@ type Model struct {
 	moving    bool
 	walkCount int
 	onPortal  bool
-
-	cam     *anim.Camera
-	held    map[string]time.Time
-	ticking bool // a moveTick chain is live
+	lastMove  time.Time // when the avatar last stepped, for idle detection
 
 	remotes map[int64]hub.PlayerState
 
@@ -82,22 +107,18 @@ type Model struct {
 	toasts  toast.Model
 	unread  map[int64]string // player id -> username with unseen DMs
 
-	field *shimmer.Field
-	start time.Time
-
 	termW, termH int
-	screen       *halfblock.Canvas
-	sb           *strings.Builder
+	cellW, cellH int // pixels per terminal cell; best known estimate
 }
 
-// New creates the overworld for a logged-in player. base must be the
-// world-sized canvas produced by plazaMap.RenderBase (it is only ever
-// read). The model joins the hub immediately; snapshot seeds the remote
-// player set.
+// New creates the overworld for a logged-in player. env carries the shared
+// Sixel palette, the session writer and the terminal cell size. The model
+// joins the hub immediately; snapshot seeds the remote player set and the
+// background renderer starts at once.
 func New(
 	theme style.Theme,
 	plazaMap *plaza.Map,
-	base *halfblock.Canvas,
+	env Env,
 	repos *storage.Repos,
 	player storage.Player,
 	handle *hub.Handle,
@@ -113,40 +134,101 @@ func New(
 		}
 	}
 
-	m := Model{
-		theme:   theme,
-		world:   plazaMap,
-		base:    base,
-		repos:   repos,
-		player:  player,
-		handle:  handle,
-		px:      px,
-		py:      py,
-		dir:     hub.DirDown,
-		cam:     anim.NewCamera(float64(px), float64(py)/2),
-		held:    make(map[string]time.Time),
-		remotes: remotes,
-		chat:    chat.New(theme),
-		inv:     inventory.New(theme),
-		toasts:  toast.New(theme),
-		unread:  make(map[int64]string),
-		field:   shimmer.NewField(),
-		start:   time.Now(),
-		sb:      &strings.Builder{},
+	r := NewRenderer(env.Pal, env.Out, plazaMap)
+	r.Start()
+
+	cellW, cellH := env.CellW, env.CellH
+	if cellW <= 0 {
+		cellW = 8
 	}
-	m.friends = friends.New(theme, repos, player, m.sendDM)
+	if cellH <= 0 {
+		cellH = 16
+	}
+
+	m := Model{
+		theme:    theme,
+		world:    plazaMap,
+		renderer: r,
+		cellW:    cellW,
+		cellH:    cellH,
+		repos:    repos,
+		player:   player,
+		handle:   handle,
+		px:       px,
+		py:       py,
+		dir:      hub.DirDown,
+		remotes:  remotes,
+		chat:     chat.New(theme),
+		inv:      inventory.New(theme),
+		toasts:   toast.New(theme),
+		unread:   make(map[int64]string),
+	}
+	m.friends = friends.New(theme, repos, player)
 	m.chat.AddSystem("welcome to shellbound — /help for commands")
 	return m
 }
 
-// sendDM persists an outgoing DM and delivers it live when possible. Used
-// by both the friends panel and /w.
-func (m Model) sendDM(to storage.Player, text string) error {
-	if err := m.repos.DMs.Save(m.player.ID, to.ID, text); err != nil {
-		return err
+// SetActive marks whether the overworld currently owns the screen. While a
+// portal world is on top it is inactive and the renderer emits no frames.
+func (m Model) SetActive(b bool) Model {
+	m.renderer.SetActive(b)
+	return m
+}
+
+// StopRenderer halts the background render goroutine; the session app wires
+// this into teardown so the goroutine never outlives the session.
+func (m Model) StopRenderer() { m.renderer.Stop() }
+
+// publish hands the renderer a fresh, immutable snapshot of everything it
+// draws. Cheap enough to call on every state change.
+func (m *Model) publish() {
+	players := make([]playerSnapshot, 0, len(m.remotes)+1)
+	for _, st := range m.remotes {
+		players = append(players, playerSnapshot{
+			id: st.Info.ID, name: st.Info.Name, color: st.Info.Color,
+			x: st.Pos.X, y: st.Pos.Y, dir: st.Dir, moving: st.Moving,
+		})
 	}
-	m.handle.Whisper(to.ID, text)
-	return nil
+	players = append(players, playerSnapshot{
+		id: m.player.ID, name: m.player.Username, color: m.player.Color,
+		x: m.px, y: m.py, dir: m.dir, moving: m.moving,
+	})
+
+	var panel []string
+	switch {
+	case m.friends.IsOpen():
+		panel = m.friends.Lines()
+	case m.inv.IsOpen():
+		panel = m.inv.Lines()
+	}
+
+	var unreadName string
+	var unreadN int
+	if len(m.unread) > 0 && !m.friends.IsOpen() {
+		for _, n := range m.unread {
+			unreadName = n
+			break
+		}
+		unreadN = len(m.unread) - 1
+	}
+
+	chatInput := ""
+	if m.chat.IsOpen() {
+		chatInput = m.chat.InputLine()
+	}
+
+	m.renderer.Submit(frameSnapshot{
+		termW: m.termW, termH: m.termH,
+		cellW: m.cellW, cellH: m.cellH,
+		players: players, selfID: m.player.ID,
+		chat:       append([]chat.Entry(nil), m.chat.History()...),
+		toast:      m.toasts.Message(),
+		panelLines: panel,
+		chatInput:  chatInput,
+		chatOpen:   m.chat.IsOpen(),
+		unreadName: unreadName,
+		unreadN:    unreadN,
+	})
 }
 
 // Init implements tea.Model.
@@ -156,10 +238,6 @@ func (m Model) Init() tea.Cmd {
 
 func animTick() tea.Cmd {
 	return tea.Tick(animTickEvery, func(t time.Time) tea.Msg { return animTickMsg(t) })
-}
-
-func moveTick() tea.Cmd {
-	return tea.Tick(moveTickEvery, func(t time.Time) tea.Msg { return moveTickMsg(t) })
 }
 
 func listenHub(ch <-chan hub.Event) tea.Cmd {
@@ -178,37 +256,55 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termW, m.termH = msg.Width, msg.Height
-		m.screen = nil // rebuilt lazily at the new size
+		m.publish()
+		return m, nil
+
+	case PixelSizeMsg:
+		// Derive cell size from the consistent (cols/rows, pixels) pair. Cell
+		// size is stable across window resizes, so this won't fight the
+		// separate WindowSizeMsg.
+		if msg.Cols > 0 && msg.Rows > 0 && msg.W > 0 && msg.H > 0 {
+			m.cellW, m.cellH = max(1, msg.W/msg.Cols), max(1, msg.H/msg.Rows)
+		}
+		m.publish()
+		return m, nil
+
+	case CellSizeMsg:
+		if msg.W > 0 && msg.H > 0 {
+			m.cellW, m.cellH = msg.W, msg.H
+		}
+		m.publish()
 		return m, nil
 
 	case animTickMsg:
-		now := time.Time(msg)
-		m.toasts.Tick(now)
-		m.cam.Update(float64(m.px), float64(m.py)/2)
+		m.toasts.Tick(time.Time(msg))
+		// Flip back to the idle pose a beat after the last step, and tell peers.
+		if m.moving && time.Since(m.lastMove) > idleAfter {
+			m.moving = false
+			m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
+		}
+		m.publish()
 		return m, animTick()
-
-	case moveTickMsg:
-		return m.stepMovement()
 
 	case hubEventMsg:
 		next, cmd := m.applyEvent(msg.ev)
+		next.publish()
 		return next, tea.Batch(cmd, listenHub(next.handle.Events()))
 
 	case hubClosedMsg:
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "connection closed"} }
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		next, cmd := m.handleKey(msg)
+		next.publish()
+		return next, cmd
 	}
 
-	// Forward everything else (e.g. cursor blinks) to whichever input is
-	// active.
+	// Forward everything else (e.g. cursor blinks) to the chat input — the
+	// only live text field; the friends panel is keyboard-driven only.
 	if m.chat.IsOpen() {
 		cmd, _ := m.chat.Update(msg)
 		return m, cmd
-	}
-	if m.friends.IsOpen() {
-		return m, m.friends.Update(msg)
 	}
 	return m, nil
 }
@@ -230,7 +326,7 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	if m.friends.IsOpen() {
-		return m, m.friends.Update(key)
+		return m.updateFriends(key)
 	}
 
 	if m.inv.IsOpen() {
@@ -255,76 +351,89 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.friends.Open(m.handle.OnlineIDs())
 		m.unread = make(map[int64]string)
 		return m, nil
-	case "up", "down", "left", "right", "w", "a", "s", "d":
-		m.held[normalizeKey(key.String())] = time.Now()
-		if !m.ticking {
-			m.ticking = true
-			return m, moveTick()
-		}
-		return m, nil
+	}
+	// Movement: step immediately on the key event itself (held movement rides
+	// the terminal's key-repeat), so it feels instant and stops the moment you
+	// release. Diagonals have dedicated keys since key-repeat only repeats the
+	// last key; Shift (or a capital letter) runs.
+	if dx, dy, run, ok := parseMove(key.String()); ok {
+		return m.step(dx, dy, run)
 	}
 	return m, nil
 }
 
-// normalizeKey folds WASD onto the arrow names so the held-key map has one
-// entry per direction.
-func normalizeKey(k string) string {
-	switch k {
-	case "w":
-		return "up"
-	case "s":
-		return "down"
-	case "a":
-		return "left"
-	case "d":
-		return "right"
+// updateFriends routes a key to the friends panel, then turns a row
+// selection into a /w command pre-filled in the chat console.
+func (m Model) updateFriends(msg tea.Msg) (Model, tea.Cmd) {
+	cmd := m.friends.Update(msg)
+	if target, ok := m.friends.TakeSelected(); ok {
+		return m, tea.Batch(cmd, m.chat.OpenWith("/w "+target.Username+" "))
 	}
-	return k
+	return m, cmd
 }
 
-// stepMovement advances the avatar one step based on recently-held keys,
-// with axis-separated collision so walls let you slide along them.
-func (m Model) stepMovement() (Model, tea.Cmd) {
-	now := time.Now()
-	heldDir := func(name string) bool {
-		t, ok := m.held[name]
-		return ok && now.Sub(t) <= heldWindow
+// parseMove maps a key string to a movement vector (dx in cells, dy in
+// half-rows) and whether to run. Cardinals are WASD/arrows, diagonals are the
+// roguelike y/u/b/n cluster, and Shift (reported as "shift+…" or an uppercase
+// letter) runs. ok is false for non-movement keys.
+func parseMove(s string) (dx, dy int, run, ok bool) {
+	if strings.HasPrefix(s, "shift+") {
+		run = true
+		s = strings.TrimPrefix(s, "shift+")
 	}
-	dx, dy := 0, 0
-	if heldDir("left") {
-		dx--
+	lower := strings.ToLower(s)
+	if s != lower {
+		run = true // an uppercase letter means Shift was held
 	}
-	if heldDir("right") {
-		dx++
+	switch lower {
+	case "up", "w":
+		dy = -1
+	case "down", "s":
+		dy = 1
+	case "left", "a":
+		dx = -1
+	case "right", "d":
+		dx = 1
+	case "y":
+		dx, dy = -1, -1
+	case "u":
+		dx, dy = 1, -1
+	case "b":
+		dx, dy = -1, 1
+	case "n":
+		dx, dy = 1, 1
+	default:
+		return 0, 0, false, false
 	}
-	if heldDir("up") {
-		dy--
-	}
-	if heldDir("down") {
-		dy++
-	}
+	return dx, dy, run, true
+}
 
-	if dx == 0 && dy == 0 {
-		// Keys released: stop the tick chain and broadcast the idle pose.
-		m.ticking = false
-		if m.moving {
-			m.moving = false
-			m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
-		}
-		return m, nil
+// step applies one movement input immediately: up to two tiles when running,
+// with axis-separated collision so walls let you slide along them. It faces
+// the direction of effort even when blocked, and fires the portal trigger on
+// entering a mouth.
+func (m Model) step(dx, dy int, run bool) (Model, tea.Cmd) {
+	tiles := 1
+	if run {
+		tiles = 2
 	}
-
 	moved := false
-	if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
-		m.px += dx
-		moved = true
-	}
-	if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
-		m.py += dy
+	for i := 0; i < tiles; i++ {
+		adv := false
+		if dx != 0 && !m.world.Blocked(m.px+dx, m.py/2) {
+			m.px += dx
+			adv = true
+		}
+		if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
+			m.py += dy
+			adv = true
+		}
+		if !adv {
+			break // ran into a wall; stop short
+		}
 		moved = true
 	}
 
-	// Face the direction of effort even when blocked.
 	switch {
 	case dx < 0:
 		m.dir = hub.DirLeft
@@ -336,31 +445,27 @@ func (m Model) stepMovement() (Model, tea.Cmd) {
 		m.dir = hub.DirDown
 	}
 
-	if moved {
-		m.walkCount++
-		m.moving = true
-		m.cam.Update(float64(m.px), float64(m.py)/2)
-		m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, true)
-
-		// Portal trigger: fires on the transition into a mouth, not while
-		// standing in one (so returning from a world doesn't re-enter).
-		if p, ok := plaza.PortalAt(m.px, m.py/2); ok {
-			if !m.onPortal {
-				m.onPortal = true
-				m.toasts.Show("✦ " + p.Name + " ✦")
-				return m, tea.Batch(moveTick(), func() tea.Msg {
-					return EnterPortalMsg{Key: p.Key, Name: p.Name}
-				})
-			}
-		} else {
-			m.onPortal = false
-		}
-	} else if m.moving {
-		// Pushing into a wall: stand still rather than pantomime walking.
-		m.moving = false
-		m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
+	if !moved {
+		return m, nil // blocked: faced the wall, didn't budge
 	}
-	return m, moveTick()
+
+	m.walkCount++
+	m.moving = true
+	m.lastMove = time.Now()
+	m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, true)
+
+	// Portal trigger: fires on entering a mouth, not while standing in one (so
+	// returning from a world doesn't immediately re-enter).
+	if p, ok := plaza.PortalAt(m.px, m.py/2); ok {
+		if !m.onPortal {
+			m.onPortal = true
+			m.toasts.Show("✦ " + p.Name + " ✦")
+			return m, func() tea.Msg { return EnterPortalMsg{Key: p.Key, Name: p.Name} }
+		}
+	} else {
+		m.onPortal = false
+	}
+	return m, nil
 }
 
 // applyEvent folds one hub event into local state.
@@ -389,10 +494,10 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 		m.chat.Add(chat.Entry{Kind: kind, Name: ev.From.Name, Color: ev.From.Color, Text: ev.Text})
 
 	case hub.EvWhisper:
+		// Whispers land in the chat console; the HUD badge nudges the player
+		// if they're busy in a panel or the message scrolls off.
 		m.chat.Add(chat.Entry{Kind: chat.KindWhisperIn, Name: ev.From.Name, Color: ev.From.Color, Text: ev.Text})
-		if !m.friends.NotifyIncoming(ev.From.ID, ev.Text) {
-			m.unread[ev.From.ID] = ev.From.Name
-		}
+		m.unread[ev.From.ID] = ev.From.Name
 
 	case hub.EvKick:
 		return m, func() tea.Msg { return DisconnectMsg{Reason: ev.Reason} }
@@ -400,11 +505,11 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// ResumeFromWorld is called by the session app when the player exits a
-// portal world: it re-snaps the camera and refreshes presence-dependent
-// UI.
+// ResumeFromWorld is called by the session app when the player exits a portal
+// world: it re-arms rendering (re-priming interpolation) and refreshes
+// presence-dependent UI.
 func (m Model) ResumeFromWorld() Model {
-	m.cam.Snap(float64(m.px), float64(m.py)/2)
+	m.renderer.SetActive(true)
 	return m
 }
 

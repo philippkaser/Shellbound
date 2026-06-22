@@ -38,6 +38,27 @@ func (m *Model) Close() { m.open = false }
 // IsOpen reports whether the panel is showing.
 func (m *Model) IsOpen() bool { return m.open }
 
+// Lines returns the panel's content as plain text rows for the pixel renderer
+// to bake into its own box (the lipgloss View is unused in the Sixel path).
+func (m *Model) Lines() []string {
+	out := []string{"Inventory", ""}
+	switch {
+	case m.err != nil:
+		out = append(out, "Could not load your satchel.")
+	case len(m.items) == 0:
+		out = append(out, "Your satchel is empty.", "Worlds beyond the portals will fill it.")
+	default:
+		for i, it := range m.items {
+			if i >= 10 {
+				out = append(out, fmt.Sprintf("... and %d more", len(m.items)-i))
+				break
+			}
+			out = append(out, fmt.Sprintf("%-24s x%d", it.Name, it.Qty), "  from "+it.WorldKey)
+		}
+	}
+	return append(out, "", "Esc to close")
+}
+
 // View renders the panel box.
 func (m *Model) View() string {
 	var b strings.Builder

@@ -26,19 +26,22 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
-// Movement is event-driven: each key press steps a whole tile (held movement
-// rides the terminal's own key-repeat) and stops the instant you let go — no
-// movement tick, no held-key window. A per-step cooldown decouples walking
-// speed from the terminal's key-repeat rate, so the pace is steady and gentle
-// rather than as fast as the keyboard fires. The anim tick only drives ambient
-// animation and flips the walk pose back to idle a beat after the last step.
+// Movement uses a steady tick so the walk pace is decoupled from the
+// terminal's key-repeat (which has a long, OS-dependent initial delay and a
+// variable rate — relying on it makes a held key stutter and feel laggy). The
+// first press steps instantly; while a direction key is held, the tick carries
+// the walk at moveTickEvery. A key counts as "held" only while fresh: a lone
+// tap expires within tapWindow (so it moves exactly one tile), and a key whose
+// repeats have begun stays live within holdSteady of the last repeat. The anim
+// tick drives ambient animation and is a backstop that returns the walk pose to
+// idle a beat after the last step.
 const (
 	animTickEvery = 100 * time.Millisecond
 	idleAfter     = 250 * time.Millisecond // revert to idle pose this long after the last step
-	// moveEvery throttles steps: a held key can fire far faster than this, but
-	// the avatar only advances one tile per interval, so walking glides tile to
-	// tile at a comfortable pace instead of sprinting at the key-repeat rate.
-	moveEvery = 150 * time.Millisecond
+
+	moveTickEvery = 120 * time.Millisecond // one tile per tick while a direction is held
+	tapWindow     = 110 * time.Millisecond // < moveTickEvery: a single tap walks exactly one tile
+	holdSteady    = 170 * time.Millisecond // a key whose repeats have begun keeps the walk alive
 )
 
 // Minimum playable terminal size.
@@ -74,8 +77,19 @@ type CellSizeMsg struct{ W, H int }
 
 // Internal tick/event messages.
 type animTickMsg time.Time
+type moveTickMsg time.Time
 type hubEventMsg struct{ ev hub.Event }
 type hubClosedMsg struct{}
+
+// moveIntent is the direction the player currently wants to walk. seen is the
+// last time a key for this direction arrived; count grows with key-repeats so
+// the tick can tell a sustained hold (repeats flowing) from a single tap.
+type moveIntent struct {
+	dx, dy int
+	run    bool
+	seen   time.Time
+	count  int
+}
 
 // Env carries the per-session rendering collaborators the server builds once
 // and hands to every overworld: the shared Sixel palette, the synchronized
@@ -103,6 +117,9 @@ type Model struct {
 	walkCount int
 	onPortal  bool
 	lastMove  time.Time // when the avatar last stepped, for idle detection
+
+	intent  moveIntent // direction currently held
+	ticking bool       // a moveTick chain is live
 
 	remotes map[int64]hub.PlayerState
 
@@ -245,6 +262,10 @@ func animTick() tea.Cmd {
 	return tea.Tick(animTickEvery, func(t time.Time) tea.Msg { return animTickMsg(t) })
 }
 
+func moveTick() tea.Cmd {
+	return tea.Tick(moveTickEvery, func(t time.Time) tea.Msg { return moveTickMsg(t) })
+}
+
 func listenHub(ch <-chan hub.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
@@ -291,6 +312,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.publish()
 		return m, animTick()
 
+	case moveTickMsg:
+		next, cmd := m.tickMove()
+		next.publish()
+		next.renderer.Kick()
+		return next, cmd
+
 	case hubEventMsg:
 		next, cmd := m.applyEvent(msg.ev)
 		next.publish()
@@ -302,6 +329,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyMsg:
 		next, cmd := m.handleKey(msg)
 		next.publish()
+		next.renderer.Kick() // render the result of the input now, not on the next tick
 		return next, cmd
 	}
 
@@ -357,18 +385,79 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.unread = make(map[int64]string)
 		return m, nil
 	}
-	// Movement: step on the key event itself (held movement rides the
-	// terminal's key-repeat), but throttle to one tile per moveEvery so the pace
-	// is steady rather than as fast as the keyboard fires. Diagonals have
-	// dedicated keys since key-repeat only repeats the last key; Shift (or a
-	// capital letter) runs.
+	// Movement. The press updates the held intent; pressMove steps instantly on
+	// a fresh press and the moveTick chain carries a hold at a steady pace.
+	// Diagonals have dedicated keys since key-repeat only repeats the last key;
+	// Shift (or a capital letter) runs.
 	if dx, dy, run, ok := parseMove(key.String()); ok {
-		if time.Since(m.lastMove) < moveEvery {
-			return m, nil // throttle: drop key-repeats that arrive too soon
-		}
-		return m.step(dx, dy, run)
+		return m.pressMove(dx, dy, run)
 	}
 	return m, nil
+}
+
+// pressMove handles a movement key event. The first press of a fresh walk steps
+// at once (so input feels instant) and starts the tick chain; a key-repeat of
+// the current direction only refreshes liveness (the tick paces the walk, so
+// speed never depends on the OS repeat rate); a change of direction responds
+// immediately.
+func (m Model) pressMove(dx, dy int, run bool) (Model, tea.Cmd) {
+	now := time.Now()
+	switch {
+	case !m.ticking:
+		// Fresh walk: step now (instant) and start the tick chain.
+		m.intent = moveIntent{dx: dx, dy: dy, run: run, seen: now, count: 1}
+		m.ticking = true
+		next, cmd := m.step(dx, dy, run)
+		if next.ticking { // a portal step ends the walk; don't start a chain
+			cmd = tea.Batch(cmd, moveTick())
+		}
+		return next, cmd
+	case dx == m.intent.dx && dy == m.intent.dy:
+		// Key-repeat of the held direction: refresh liveness; the tick paces the
+		// walk, so don't step here (keeps speed off the OS repeat rate).
+		m.intent.seen = now
+		m.intent.run = run
+		m.intent.count++
+		return m, nil
+	default:
+		// Direction change: respond at once; the tick chain is already live.
+		m.intent = moveIntent{dx: dx, dy: dy, run: run, seen: now, count: 1}
+		return m.step(dx, dy, run)
+	}
+}
+
+// tickMove is one beat of the held-walk chain: it steps in the current
+// direction while the key is still live, and otherwise stops and goes idle.
+func (m Model) tickMove() (Model, tea.Cmd) {
+	if !m.ticking {
+		return m, nil
+	}
+	// A panel or the chat console stole focus — stop walking.
+	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() {
+		return m.stopWalk(), nil
+	}
+	window := tapWindow
+	if m.intent.count >= 2 {
+		window = holdSteady // repeats have begun: this is a real hold
+	}
+	if time.Since(m.intent.seen) > window {
+		return m.stopWalk(), nil // released (or the tap is done)
+	}
+	next, cmd := m.step(m.intent.dx, m.intent.dy, m.intent.run)
+	if !next.ticking {
+		return next, cmd
+	}
+	return next, tea.Batch(cmd, moveTick())
+}
+
+// stopWalk ends the tick chain and broadcasts the idle pose.
+func (m Model) stopWalk() Model {
+	m.ticking = false
+	if m.moving {
+		m.moving = false
+		m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
+	}
+	return m
 }
 
 // updateFriends routes a key to the friends panel, then turns a row
@@ -474,6 +563,8 @@ func (m Model) step(dx, dy int, run bool) (Model, tea.Cmd) {
 	if p, ok := plaza.PortalAt(m.px, m.py/2); ok {
 		if !m.onPortal {
 			m.onPortal = true
+			m.moving = false
+			m.ticking = false // entering a world ends the walk; let the chain die
 			m.toasts.Show("✦ " + p.Name + " ✦")
 			return m, func() tea.Msg { return EnterPortalMsg{Key: p.Key, Name: p.Name} }
 		}

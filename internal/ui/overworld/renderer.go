@@ -20,18 +20,26 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/chat"
 )
 
-// Render cadence and framing. The play area is capped so a huge terminal shows
-// the same world view as a modest one (and to bound per-frame Sixel bandwidth);
-// the image is centered in the terminal.
+// Render cadence and framing. The play area is a fixed pixel size, letterboxed
+// and centered in the terminal, so every player sees exactly the same slice of
+// the world no matter how large their terminal is (and per-frame Sixel
+// bandwidth stays bounded).
 const (
-	// 20 fps is plenty: wall-clock interpolation keeps motion fluid, while the
-	// lower rate eases per-frame Sixel CPU/bandwidth so the render loop never
-	// falls behind a slow link.
-	renderFPS    = 20
-	maxWorldW    = 960  // max play-area width in pixels
-	maxWorldH    = 600  // max play-area height in pixels
-	moveLerpTau  = 0.08 // seconds; avatar/camera easing — tuned to glide smoothly between tiles at the walk cadence
+	// 20 fps is the steady cadence; wall-clock interpolation keeps motion fluid
+	// at that rate while keeping per-frame Sixel CPU/bandwidth low so the loop
+	// never falls behind a slow link. Input additionally Kick()s an out-of-band
+	// frame so a keypress shows immediately instead of waiting up to a tick.
+	renderFPS = 20
+	// viewW/viewH is the fixed play area in pixels. It's letterboxed: a bigger
+	// terminal just gets wider margins, never more world. Sized to fit a common
+	// terminal (≈80×24 at an 8×16 cell); smaller terminals clamp to what fits.
+	viewW        = 640
+	viewH        = 352
+	moveLerpTau  = 0.05 // seconds; avatar/camera easing — short so input feels tight and snappy
 	ambientLight = 0.5
+	// kickMinGap rate-limits out-of-band (input-driven) frames so a burst of
+	// keys can't outrun the encoder; the steady tick covers anything skipped.
+	kickMinGap = 22 * time.Millisecond
 )
 
 // playerSnapshot is the minimal per-player data the renderer needs.
@@ -102,6 +110,7 @@ type Renderer struct {
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
+	kickCh   chan struct{} // input asks for an immediate, out-of-band frame
 }
 
 // NewRenderer builds a renderer for one session (not yet running). The cell
@@ -116,9 +125,20 @@ func NewRenderer(pal *canvas.Palette, out *syncwriter.Writer, world *plaza.Map) 
 		lights: light.NewField(),
 		ents:   make(map[int64]*entity),
 		stopCh: make(chan struct{}),
+		kickCh: make(chan struct{}, 1),
 	}
 	r.active.Store(true)
 	return r
+}
+
+// Kick requests an immediate frame (e.g. right after a keypress) so input shows
+// without waiting for the next steady tick. Non-blocking and coalescing: a kick
+// already pending is enough.
+func (r *Renderer) Kick() {
+	select {
+	case r.kickCh <- struct{}{}:
+	default:
+	}
 }
 
 // Start launches the render goroutine.
@@ -154,6 +174,12 @@ func (r *Renderer) loop() {
 			if r.active.Load() {
 				r.frame()
 			}
+		case <-r.kickCh:
+			// Out-of-band frame for input; skip if we just drew so a key burst
+			// can't outrun the encoder (the steady tick still covers it).
+			if r.active.Load() && time.Since(r.last) >= kickMinGap {
+				r.frame()
+			}
 		}
 	}
 }
@@ -184,14 +210,17 @@ func (r *Renderer) frame() {
 	}
 }
 
-// dims returns the frame's pixel size (a whole number of cells, capped to the
-// play-area maximum) and the top-left cell offset that centers it.
+// dims returns the frame's pixel size and the top-left cell offset that centers
+// it. The image is the fixed viewW×viewH viewport, snapped down to a whole
+// number of cells so it lands on cell boundaries (which makes centering exact),
+// and clamped to what the terminal can show (one row is held free as cheap
+// insurance against a Sixel scroll). Because the target is a fixed pixel size,
+// every player sees the same world: a larger terminal only widens the margins.
 //
 // The cell size comes from the snapshot — derived from a terminal query or a
-// consistent pixel report, falling back to SHELLBOUND_CELL. Because it is
-// stable across window resizes, sizing never goes briefly wrong when only the
-// column/row count changes. The image is held to one fewer row than the
-// terminal as cheap insurance against a Sixel scroll.
+// consistent pixel report, falling back to SHELLBOUND_CELL — and is stable
+// across window resizes, so sizing never goes briefly wrong when only the
+// column/row count changes.
 func (r *Renderer) dims(snap frameSnapshot) (pw, ph, left, top int) {
 	cols, rows := snap.termW, snap.termH
 	cw, ch := snap.cellW, snap.cellH
@@ -202,14 +231,17 @@ func (r *Renderer) dims(snap frameSnapshot) (pw, ph, left, top int) {
 		ch = 16
 	}
 
-	imgCols := cols
-	if maxCols := maxWorldW / cw; imgCols > maxCols {
-		imgCols = maxCols
+	// Target the fixed viewport, but never wider/taller than the terminal can
+	// show (leaving the bottom row free).
+	imgW := viewW
+	if maxW := cols * cw; imgW > maxW {
+		imgW = maxW
 	}
-	imgRows := rows - 1 // leave the bottom row free so the image can't scroll
-	if maxRows := maxWorldH / ch; imgRows > maxRows {
-		imgRows = maxRows
+	imgH := viewH
+	if maxH := (rows - 1) * ch; imgH > maxH {
+		imgH = maxH
 	}
+	imgCols, imgRows := imgW/cw, imgH/ch // snap down to whole cells
 	if imgCols < 1 {
 		imgCols = 1
 	}

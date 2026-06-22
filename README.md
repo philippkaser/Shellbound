@@ -100,19 +100,24 @@ Enter on a name pre-fills a `/w` to them.
   (`internal/render/syncwriter`) shared with Bubble Tea. The event loop only
   publishes cheap state snapshots, so the heavy encode never causes input lag;
   player and camera motion are interpolated at the render rate for smoothness
-  independent of the logic tick. The image is centered and capped to a fixed
-  play area, so every player sees the same amount of world regardless of
-  terminal size; when the client reports its pixel dimensions the real cell
-  size is derived from the PTY so centering is exact. The SSH layer pins
-  sessions to TrueColor.
-- **Camera & motion.** Movement is event-driven: each key press steps a whole
-  tile so the avatar always lands square on the floor grid, and held walking
-  rides the terminal's own key-repeat. A per-step cooldown (`moveEvery`)
-  throttles steps to a steady, gentle pace, decoupling walk speed from however
-  fast the keyboard fires; it stops the instant you release. The renderer then
-  eases each avatar toward its grid target with frame-rate-independent smoothing
-  tuned to glide between tiles at the walk cadence, and keeps the camera
-  centered on the local player, so motion glides without adding input lag.
+  independent of the logic tick. Frames are produced on a steady 20 fps clock,
+  and input additionally `Kick()`s an out-of-band frame so a keypress shows
+  immediately instead of waiting up to a tick. The image is a **fixed
+  viewW×viewH pixel viewport**, snapped down to whole cells and letterboxed:
+  every player sees exactly the same slice of the world, and a larger terminal
+  just gets wider margins. Snapping to cell boundaries makes centering exact;
+  the cell size is derived from the PTY (or a terminal query) and is stable
+  across resizes. The SSH layer pins sessions to TrueColor.
+- **Camera & motion.** Movement runs on a steady tick so the walk pace is
+  decoupled from the terminal's key-repeat (which has a long, OS-dependent
+  initial delay and a variable rate — riding it directly makes a held key
+  stutter and feel laggy). The first press steps instantly; while a direction
+  key is held, the tick carries the walk one tile per `moveTickEvery`. A key is
+  "held" only while fresh: a lone tap expires within `tapWindow` (so it moves
+  exactly one tile), while a key whose repeats have begun stays live within
+  `holdSteady` of the last repeat. Each step lands square on the floor grid; the
+  renderer eases the avatar toward its target with short, snappy frame-rate-
+  independent smoothing and keeps the camera centered on the local player.
   Diagonals have dedicated keys (key-repeat only repeats the last key); Shift
   runs (two tiles per step). Below 60×20 cells, a resize prompt is baked into
   the frame.

@@ -30,7 +30,7 @@ const (
 	renderFPS    = 20
 	maxWorldW    = 960  // max play-area width in pixels
 	maxWorldH    = 600  // max play-area height in pixels
-	moveLerpTau  = 0.06 // seconds; avatar/camera easing — small so input feels tight
+	moveLerpTau  = 0.08 // seconds; avatar/camera easing — tuned to glide smoothly between tiles at the walk cadence
 	ambientLight = 0.5
 )
 

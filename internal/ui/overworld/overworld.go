@@ -26,14 +26,19 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
-// Movement is event-driven: each key press steps immediately (held movement
-// rides the terminal's own key-repeat), so input feels 1:1 and stops the
-// instant you let go — no movement tick, no held-key window. The anim tick
-// only drives ambient animation and flips the walk pose back to idle a beat
-// after the last step.
+// Movement is event-driven: each key press steps a whole tile (held movement
+// rides the terminal's own key-repeat) and stops the instant you let go — no
+// movement tick, no held-key window. A per-step cooldown decouples walking
+// speed from the terminal's key-repeat rate, so the pace is steady and gentle
+// rather than as fast as the keyboard fires. The anim tick only drives ambient
+// animation and flips the walk pose back to idle a beat after the last step.
 const (
 	animTickEvery = 100 * time.Millisecond
 	idleAfter     = 250 * time.Millisecond // revert to idle pose this long after the last step
+	// moveEvery throttles steps: a held key can fire far faster than this, but
+	// the avatar only advances one tile per interval, so walking glides tile to
+	// tile at a comfortable pace instead of sprinting at the key-repeat rate.
+	moveEvery = 150 * time.Millisecond
 )
 
 // Minimum playable terminal size.
@@ -352,11 +357,15 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		m.unread = make(map[int64]string)
 		return m, nil
 	}
-	// Movement: step immediately on the key event itself (held movement rides
-	// the terminal's key-repeat), so it feels instant and stops the moment you
-	// release. Diagonals have dedicated keys since key-repeat only repeats the
-	// last key; Shift (or a capital letter) runs.
+	// Movement: step on the key event itself (held movement rides the
+	// terminal's key-repeat), but throttle to one tile per moveEvery so the pace
+	// is steady rather than as fast as the keyboard fires. Diagonals have
+	// dedicated keys since key-repeat only repeats the last key; Shift (or a
+	// capital letter) runs.
 	if dx, dy, run, ok := parseMove(key.String()); ok {
+		if time.Since(m.lastMove) < moveEvery {
+			return m, nil // throttle: drop key-repeats that arrive too soon
+		}
 		return m.step(dx, dy, run)
 	}
 	return m, nil
@@ -372,8 +381,9 @@ func (m Model) updateFriends(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
-// parseMove maps a key string to a movement vector (dx in cells, dy in
-// half-rows) and whether to run. Cardinals are WASD/arrows, diagonals are the
+// parseMove maps a key string to a movement vector in whole grid tiles (dx, dy
+// each in {-1, 0, 1}) and whether to run. step() converts the tile delta into
+// the half-row coordinate space. Cardinals are WASD/arrows, diagonals are the
 // roguelike y/u/b/n cluster, and Shift (reported as "shift+…" or an uppercase
 // letter) runs. ok is false for non-movement keys.
 func parseMove(s string) (dx, dy int, run, ok bool) {
@@ -408,15 +418,20 @@ func parseMove(s string) (dx, dy int, run, ok bool) {
 	return dx, dy, run, true
 }
 
-// step applies one movement input immediately: up to two tiles when running,
-// with axis-separated collision so walls let you slide along them. It faces
-// the direction of effort even when blocked, and fires the portal trigger on
-// entering a mouth.
+// step applies one movement input immediately, moving a whole tile at a time
+// (up to two tiles when running) so the avatar always lands square on the floor
+// grid the plaza is drawn on. Collision is axis-separated so walls let you
+// slide along them; it faces the direction of effort even when blocked, and
+// fires the portal trigger on entering a mouth.
 func (m Model) step(dx, dy int, run bool) (Model, tea.Cmd) {
 	tiles := 1
 	if run {
 		tiles = 2
 	}
+	// py is measured in half-rows (two per cell row), so one whole tile of
+	// vertical travel is two units. Stepping by a full tile keeps the avatar
+	// centered on a floor tile instead of straddling two.
+	stepY := dy * 2
 	moved := false
 	for i := 0; i < tiles; i++ {
 		adv := false
@@ -424,8 +439,8 @@ func (m Model) step(dx, dy int, run bool) (Model, tea.Cmd) {
 			m.px += dx
 			adv = true
 		}
-		if dy != 0 && !m.world.Blocked(m.px, (m.py+dy)/2) {
-			m.py += dy
+		if stepY != 0 && !m.world.Blocked(m.px, (m.py+stepY)/2) {
+			m.py += stepY
 			adv = true
 		}
 		if !adv {

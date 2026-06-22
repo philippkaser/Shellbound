@@ -5,7 +5,7 @@ you're standing in a shared plaza: walk around, watch other players wander
 past, chat, whisper, make friends. The plaza is drawn as **isometric pixel
 art** using real terminal graphics (Sixel) — strict black-and-white, with
 exactly three splashes of color (player names, chat usernames, and each portal
-shimmering in its world's own signature hue) and interactive lighting that
+swirling as a round vortex in its world's own signature hue) and interactive lighting that
 follows you and pools around the lamps. Fireflies drift, birds cross overhead,
 the fountain spits droplets.
 
@@ -86,8 +86,11 @@ Enter on a name pre-fills a `/w` to them.
   (names, chat, HUD, panels) is baked with a 5×7 bitmap font so the entire frame
   composites in one place. **Interactive lighting** (`internal/render/light`)
   dims the plaza and lets the player and lamps reveal it, with blocky glow
-  halos. Each portal shimmers in one or two hues derived from a hash of its
-  world key, so a world's color is stable forever.
+  halos. Each portal is a round vortex (`internal/plaza/portals.go`) — a pulsing
+  core, rotating spiral arms and rings of light travelling out to a crisp rim,
+  over a faint ground ring and a colored bloom that bleeds onto the floor. Its
+  one or two hues are derived from a hash of its world key, so a world's color
+  is stable forever.
 - **The render loop.** Bubble Tea's line renderer can't host a Sixel image, so
   the plaza returns a constant `View` (keeping that renderer quiescent) and a
   dedicated background goroutine (`internal/ui/overworld/renderer.go`) produces
@@ -100,13 +103,17 @@ Enter on a name pre-fills a `/w` to them.
   terminal size; when the client reports its pixel dimensions the real cell
   size is derived from the PTY so centering is exact. The SSH layer pins
   sessions to TrueColor.
-- **Camera & motion.** Movement is event-driven: each key press steps the grid
-  position immediately and held walking rides the terminal's own key-repeat, so
-  input is 1:1 and stops the instant you release. The renderer then eases each
-  avatar toward its grid target with frame-rate-independent smoothing and keeps
-  the camera centered on the local player, so motion still glides without adding
-  input lag. Diagonals have dedicated keys (key-repeat only repeats the last
-  key); Shift runs. Below 60×20 cells, a resize prompt is baked into the frame.
+- **Camera & motion.** Movement is event-driven: each key press steps a whole
+  tile so the avatar always lands square on the floor grid, and held walking
+  rides the terminal's own key-repeat. A per-step cooldown (`moveEvery`)
+  throttles steps to a steady, gentle pace, decoupling walk speed from however
+  fast the keyboard fires; it stops the instant you release. The renderer then
+  eases each avatar toward its grid target with frame-rate-independent smoothing
+  tuned to glide between tiles at the walk cadence, and keeps the camera
+  centered on the local player, so motion glides without adding input lag.
+  Diagonals have dedicated keys (key-repeat only repeats the last key); Shift
+  runs (two tiles per step). Below 60×20 cells, a resize prompt is baked into
+  the frame.
 - **Multiplayer.** One in-memory hub holds all sessions. Input is local
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.

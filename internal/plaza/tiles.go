@@ -45,6 +45,9 @@ func project(gx, gy int, originSx, originSy float64) (int, int) {
 // screen-space point at the canvas's top-left; t is seconds since server
 // start (drives water ripple and statue spray).
 func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
+	// The distant city behind the plaza, drawn first so everything paints over it.
+	m.renderSkyline(c, originSx, originSy)
+
 	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 3)
 	gx0, gy0 = clampi(gx0, 0, m.W-1), clampi(gy0, 0, m.H-1)
 	gx1, gy1 = clampi(gx1, 0, m.W-1), clampi(gy1, 0, m.H-1)

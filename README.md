@@ -168,20 +168,23 @@ Enter on a name pre-fills a `/w` to them.
   a `Render` handle (the shared palette, the synchronized session writer and
   the cell size) so a world can ship full Sixel frames exactly like the
   plaza. The **Bomberman** portal leads to **The Vault** (`internal/worlds/
-  bomber`): a single-player bomb arena rendered in the same isometric/lit
-  Sixel style, painting its blasts and pickups in the portal's own hue, that
-  grants a *Spark Core* to your inventory when you clear it. Chess and Doom
-  are still the text "coming soon" placeholder.
+  bomber`): an isometric bomb arena that grants a *Spark Core* when cleared.
+  The **Doom** portal leads to a first-person **raycast shooter**
+  (`internal/worlds/doom`): perspective walls with brick shading, billboarded
+  imps whose eyes glow in the portal's hue, hitscan firing and a
+  *Hellbreaker's Mark* for clearing the hall. Both paint their accents in the
+  portal's own colour, so a world and its gateway look like one place. Chess
+  is still the text "coming soon" placeholder.
 - **Persistence.** Pure-Go SQLite, single writer connection, in-code
   migrations on startup. Tables: `players`, `friends`, `dms`, `inventory`,
   `saves`.
 
 ## Roadmap
 
-- **Done** — first real portal world (Bomberman → "The Vault"), with a
-  victory item grant through the real inventory pipeline.
-- **1.x** — more powerups and arena variety; inventory that the plaza shows
-  off; enemy behaviours.
+- **Done** — two portal worlds: Bomberman → "The Vault" (bomb arena) and
+  Doom → a raycast FPS, both granting a victory item through the real
+  inventory pipeline.
+- **1.x** — Chess; richer enemy behaviour; inventory the plaza shows off.
 - **Later** — Chess (with correspondence via DMs?), the Doom portal doing
   whatever a terminal can get away with, player-placed decorations,
   moderation tools.
@@ -195,7 +198,7 @@ internal/hub/        presence + broadcast
 internal/auth/       fingerprints, username rules
 internal/storage/    sqlite, migrations, repositories
 internal/world/      World interface, registry, scoped stores + render handle
-internal/worlds/     world implementations (bomber "The Vault", comingsoon)
+internal/worlds/     world implementations (bomber, doom, comingsoon)
 internal/plaza/      map, isometric tiles, portals
 internal/ui/         login, overworld, chat, inventory, friends, toast
 internal/render/     canvas, sixel, iso, light, sprites, screen, syncwriter

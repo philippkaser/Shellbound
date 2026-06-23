@@ -21,6 +21,7 @@ import (
 	"github.com/shellbound/shellbound/internal/world"
 	"github.com/shellbound/shellbound/internal/worlds/bomber"
 	"github.com/shellbound/shellbound/internal/worlds/comingsoon"
+	"github.com/shellbound/shellbound/internal/worlds/doom"
 )
 
 // envOr returns the environment variable or a default.
@@ -50,14 +51,17 @@ func main() {
 	repos := storage.NewRepos(db)
 	log.Info("database ready", "path", dbPath)
 
-	// Register the worlds behind the portals. "bomberman" leads to the real
-	// arena game (The Vault); the rest are still the "coming soon" placeholder.
-	// Shipping another mini-game means registering it here — nothing else changes.
+	// Register the worlds behind the portals. "bomberman" leads to the arena
+	// game (The Vault) and "doom" to the raycast shooter; the rest are still the
+	// "coming soon" placeholder. Adding a mini-game means registering it here.
 	registry := world.NewRegistry()
 	for _, p := range plaza.Portals {
 		var w world.World = comingsoon.New(p.Key, p.Name)
-		if p.Key == "bomberman" {
+		switch p.Key {
+		case "bomberman":
 			w = bomber.New(p.Key, p.Name)
+		case "doom":
+			w = doom.New(p.Key, p.Name)
 		}
 		if err := registry.Register(w); err != nil {
 			log.Fatal("register world", "key", p.Key, "err", err)

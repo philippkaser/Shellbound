@@ -90,13 +90,17 @@ func PaletteAccents() []canvas.Color {
 // poolShade returns the surface color for a pool block at (bx, by) pixels from
 // the center, normalized radius nd, at time t. A few drifting sines layer into
 // shifting caustics so the pool glints like water; the body fades gently to the
-// rim and the hue drifts a touch for life.
+// rim and the hue drifts a touch for life. The caustics are sampled on a coarse
+// grid so the shimmer reads as chunky water rather than fine noise.
 func poolShade(baseHue, nd, bx, by, t float64) canvas.Color {
-	shim := 0.09*math.Sin(bx*0.50+t*1.9) +
-		0.07*math.Sin(by*0.62-t*1.5) +
-		0.05*math.Sin((bx+by)*0.34+t*2.6)
+	const cell = 6 // caustic sample size in px (bigger = chunkier shimmer)
+	qx := math.Round(bx/cell) * cell
+	qy := math.Round(by/cell) * cell
+	shim := 0.10*math.Sin(qx*0.16+t*1.6) +
+		0.07*math.Sin(qy*0.20-t*1.3) +
+		0.05*math.Sin((qx+qy)*0.10+t*2.1)
 	l := orbLightMid - orbRadialFade*nd + shim
-	hue := baseHue + portalAccentDelta*(0.4+0.3*math.Sin((bx-by)*0.30+t*1.1))
+	hue := baseHue + portalAccentDelta*(0.4+0.3*math.Sin((qx-qy)*0.11+t*1.0))
 	return canvas.HSL(hue, portalSat, clampLight(l))
 }
 

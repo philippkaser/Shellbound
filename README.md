@@ -5,9 +5,9 @@ you're standing in a shared plaza: walk around, watch other players wander
 past, chat, whisper, make friends. The plaza is drawn as **isometric pixel
 art** using real terminal graphics (Sixel) — strict black-and-white, with
 exactly three splashes of color (player names, chat usernames, and each portal
-rippling as an isometric pixel-art vortex in its world's own signature hue) and interactive lighting that
-follows you and pools around the lamps. Fireflies drift, birds cross overhead,
-the fountain spits droplets.
+shimmering as an isometric pool of its world's own signature hue) and interactive lighting that
+follows you and pools around the lamps. Fireflies drift and the fountain spits
+droplets.
 
 ```
 ssh -p 80 your-server
@@ -123,10 +123,10 @@ Enter on a name pre-fills a `/w` to them.
   (names, chat, HUD, panels) is baked with a 5×7 bitmap font so the entire frame
   composites in one place. **Interactive lighting** (`internal/render/light`)
   dims the plaza and lets the player and lamps reveal it, with blocky glow
-  halos. Each portal is a vortex (`internal/plaza/portals.go`) that lies in the
-  isometric ground plane as a 2:1 ellipse of chunky pixel-art blocks: soft rings
-  of light ripple outward from the core, the hue drifts continuously with the
-  wave for smooth transitions, and a smooth colored bloom plus a soft floor
+  halos. Each portal is a pool (`internal/plaza/portals.go`) lying in the
+  isometric ground plane as a 2:1 ellipse of chunky pixel-art blocks: its
+  surface shimmers with drifting caustics like the fountain's water, motes of
+  its light drift up and fade, and a smooth colored bloom plus a soft floor
   light wash the portal's glow gently onto the surrounding tiles. Its
   low-saturation hue is derived from a hash of its world key, so a world's color
   is stable forever.

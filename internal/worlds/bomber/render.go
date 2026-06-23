@@ -204,21 +204,28 @@ func (m *model) drawPlayer(footX, footY int, t float64) {
 	sprites.Draw(m.scr, footX, footY, sprites.Facing(g.face), frame, moving)
 }
 
-// drawBomb is a dark sphere with a sheen and a fuse spark that quickens as the
-// fuse runs down.
+// drawBomb is a chunky dark sphere sitting on the tile: a ground shadow, a
+// black outline for contrast against the floor, a sheen, and a fuse spark that
+// quickens and brightens as the fuse runs down. It pulses so it's easy to spot.
 func (m *model) drawBomb(footX, footY int, b bomb, t float64) {
 	frac := float64(b.fuse) / fuseTicks
-	r := 6 + int(2*(1-frac)*math.Abs(math.Sin(t*8)))
-	cy := footY - 7
-	m.scr.FillCircle(footX, cy, r, 0x303030)
-	m.scr.FillCircle(footX, cy, r, 0x1A1A1A) // overdraw inner darker? keep sheen below
-	m.scr.FillCircle(footX, cy, r-1, 0x2A2A2A)
-	m.scr.FillCircle(footX-2, cy-2, 2, 0x5A5A5A) // sheen
-	// Fuse + spark: blink faster near detonation.
-	speed := 6 + (1-frac)*20
-	if math.Sin(t*speed) > 0 {
-		m.scr.VLine(footX, cy-r-3, cy-r, 0x8E8E8E)
-		m.scr.FillCircle(footX, cy-r-4, 2, m.accent(0.62))
+	pulse := 1 + 0.14*math.Sin(t*(7+(1-frac)*16))
+	r := int(10 * pulse)
+	cy := footY - r - 1
+
+	m.scr.FillCircle(footX, footY-1, r-2, 0x070707)  // ground shadow
+	m.scr.FillCircle(footX, cy, r+1, 0x000000)       // outline
+	m.scr.FillCircle(footX, cy, r, 0x303030)         // body
+	m.scr.FillCircle(footX, cy, r-3, 0x1E1E1E)       // shaded belly
+	m.scr.FillCircle(footX-r/3, cy-r/3, 2, 0xB0B0B0) // sheen
+	m.scr.FillRect(footX-1, cy-r-2, 3, 3, 0x6A6A6A)  // fuse nub
+
+	// Spark: blinks faster as detonation nears, in the world's hue.
+	speed := 8 + (1-frac)*24
+	if math.Sin(t*speed) > -0.2 {
+		sx := footX + int(2*math.Sin(t*13))
+		m.scr.FillCircle(sx, cy-r-5, 2, m.accent(0.62))
+		m.scr.Set(sx, cy-r-7, m.accent(0.5))
 	}
 }
 

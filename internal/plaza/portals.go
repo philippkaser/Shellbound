@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"math"
 
-	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
 )
@@ -26,14 +25,11 @@ const (
 	haloHalfH = 28
 )
 
-// Wave shaping: rings of light ripple outward from the core. The portal reads
-// as soft concentric pulses rather than a harsh spinning vortex.
+// Surface shaping: drifting caustics make the pool shimmer like the plaza
+// fountain's water, brightest at the center and fading to the rim.
 const (
-	waveFreq      = 13.0 // ring count across the radius (radians)
-	waveSpeed     = 3.6  // how fast rings travel outward
-	waveAmp       = 0.13 // lightness swing between ring crest and trough
-	orbLightMid   = 0.50 // base lightness at the core
-	orbRadialFade = 0.20 // lightness lost from core to rim
+	orbLightMid   = 0.50 // base lightness at the center of the pool
+	orbRadialFade = 0.20 // lightness lost from center to rim
 )
 
 // Portal color discipline: each portal has a signature hue derived from its
@@ -91,16 +87,16 @@ func PaletteAccents() []canvas.Color {
 	return out
 }
 
-// orbShade returns the vortex color for a disc block at normalized radius nd
-// (0 at the core, 1 at the rim) at time t. A single sine wave travels outward
-// from the core, so the portal reads as soft concentric ripples; the hue drifts
-// continuously with the wave (for smooth transitions) and the body fades gently
-// toward the rim.
-func orbShade(baseHue, nd, t float64) canvas.Color {
-	// Concentric wave: the crest moves outward as t grows.
-	wave := math.Sin(nd*waveFreq - t*waveSpeed)
-	hue := baseHue + portalAccentDelta*(0.5+0.5*wave) // continuous drift, not a hard band
-	l := orbLightMid + waveAmp*wave - orbRadialFade*nd
+// poolShade returns the surface color for a pool block at (bx, by) pixels from
+// the center, normalized radius nd, at time t. A few drifting sines layer into
+// shifting caustics so the pool glints like water; the body fades gently to the
+// rim and the hue drifts a touch for life.
+func poolShade(baseHue, nd, bx, by, t float64) canvas.Color {
+	shim := 0.09*math.Sin(bx*0.50+t*1.9) +
+		0.07*math.Sin(by*0.62-t*1.5) +
+		0.05*math.Sin((bx+by)*0.34+t*2.6)
+	l := orbLightMid - orbRadialFade*nd + shim
+	hue := baseHue + portalAccentDelta*(0.4+0.3*math.Sin((bx-by)*0.30+t*1.1))
 	return canvas.HSL(hue, portalSat, clampLight(l))
 }
 
@@ -146,10 +142,9 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 	// ground like the lamps do, with no hard edge.
 	softGlow(c, ax, cy, haloHalfW, haloHalfH, canvas.HSL(baseHue, portalSat, 0.30))
 
-	// The vortex itself: an iso ground ellipse of chunky orbPixel blocks so it
-	// sits in the same pixel-art register as the sprites and tiles. Each block
-	// is shaded by its center sample; nd is the elliptical (world-circular)
-	// distance so the ripples read as concentric circles on the floor.
+	// The pool itself: an iso ground ellipse of chunky orbPixel blocks so it sits
+	// in the same pixel-art register as the sprites and tiles. nd is the
+	// elliptical (world-circular) distance; the surface shimmers like water.
 	for by := -orbHalfH; by <= orbHalfH; by += orbPixel {
 		for bx := -orbHalfW; bx <= orbHalfW; bx += orbPixel {
 			nx := float64(bx+orbPixel/2) / orbHalfW
@@ -158,7 +153,7 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 			if nd > 1 {
 				continue
 			}
-			col := orbShade(baseHue, nd, t)
+			col := poolShade(baseHue, nd, float64(bx), float64(by), t)
 			for yy := 0; yy < orbPixel; yy++ {
 				for xx := 0; xx < orbPixel; xx++ {
 					c.Set(ax+bx+xx, cy+by+yy, col)
@@ -169,38 +164,32 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 
 	drawGroundRing(c, ax, cy, baseHue, t)
 
-	// Fountain spray: a colored crest and droplets arcing up from the pool and
-	// falling back, in the same droplet language as the plaza fountain so the
-	// two read as one family — here it's a fountain of the portal's own light.
-	drawSpray(c, ax, cy, baseHue, t)
+	// A few motes of the portal's light drift up from the pool and fade — a
+	// gentle particle effect that hints the gateway is alive.
+	drawParticles(c, ax, cy, baseHue, t)
 
 	// Name label, centered beneath, white with a black shadow for legibility.
 	lw := canvas.TextWidth(p.Name)
 	c.DrawTextShadow(ax-lw/2, cy+orbHalfH+6, p.Name, 0xFFFFFF, 0x000000)
 }
 
-// drawSpray paints the portal's fountain: a pulsing colored crest at the pool's
-// center and a handful of droplets arcing up under "gravity" and splashing back
-// down, mirroring the statue spray in tiles.go but in the portal's hue.
-func drawSpray(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
-	// Crest — a bright source blob just above the pool surface.
-	ph := anim.Phase(t, 5, 3, 0)
-	crestL := []float64{0.52, 0.62, 0.56}[ph]
-	c.FillCircle(ax, cy-4, 3, canvas.HSL(baseHue, portalSat, clampLight(crestL)))
-	c.FillCircle(ax, cy-9, 2, canvas.HSL(baseHue, portalSat, clampLight(0.60)))
-
-	const drops = 11
-	for d := 0; d < drops; d++ {
-		fd := float64(d)
-		prog := math.Mod(t*0.85+fd*0.19, 1.0) // 0..1 life of a droplet
-		dir := 1.0
-		if d%2 == 0 {
-			dir = -1.0
+// drawParticles lifts sparse colored motes off the pool, swaying as they rise
+// and fading out — additive, so they glow over whatever is behind them.
+func drawParticles(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
+	const n = 8
+	for i := 0; i < n; i++ {
+		fi := float64(i)
+		prog := math.Mod(t*0.35+fi*0.317, 1.0) // 0..1 rise life
+		if prog < 0.03 {
+			continue
 		}
-		dx := int(dir * prog * (3 + fd*1.1))
-		dy := int(120 * prog * (prog - 1)) // up then back down to the pool (peak ~30px)
-		l := clampLight(0.62 - 0.18*prog)  // dim a touch as it falls
-		c.FillRect(ax+dx, cy-6+dy, orbPixel, orbPixel, canvas.HSL(baseHue, portalSat, l))
+		x := ax + int(7*math.Sin(t*0.9+fi*2.3)) + int((fi-3.5)*4)
+		y := cy - 3 - int(prog*30)
+		l := clampLight(0.25 + 0.4*(1-prog)) // fade as it climbs
+		col := canvas.HSL(baseHue, portalSat, l)
+		c.Set(x, y, c.At(x, y).Lighten(col))
+		c.Set(x+1, y, c.At(x+1, y).Lighten(col.Scale(0.55)))
+		c.Set(x, y+1, c.At(x, y+1).Lighten(col.Scale(0.55)))
 	}
 }
 

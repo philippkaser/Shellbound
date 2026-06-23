@@ -19,10 +19,12 @@
 // clipped. Portals are not tiles — see portals.go.
 package plaza
 
-// Plaza dimensions in cells.
+// Plaza dimensions in cells. The hand-drawn layout below is wider/taller than
+// this; Load clips it to these bounds and forces the border, so the plaza can
+// be resized here without re-drawing the art.
 const (
-	Width  = 100
-	Height = 50
+	Width  = 92
+	Height = 44
 )
 
 const layout = `####################################################################################################
@@ -138,6 +140,16 @@ func Load() *Map {
 		}
 		y++
 		row = end + 1
+	}
+
+	// Force a 2-cell wall border regardless of the (possibly clipped) art, so
+	// shrinking the map can never leave an open edge.
+	for cy := 0; cy < Height; cy++ {
+		for cx := 0; cx < Width; cx++ {
+			if cx < 2 || cx >= Width-2 || cy < 2 || cy >= Height-2 {
+				m.tiles[cy*Width+cx] = '#'
+			}
+		}
 	}
 
 	for cy := 0; cy < Height; cy++ {

@@ -134,9 +134,9 @@ func (m *model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "s", "down":
 			m.g.forward(-moveStep)
 		case "a":
-			m.g.strafe(-strafeStep)
-		case "d":
 			m.g.strafe(strafeStep)
+		case "d":
+			m.g.strafe(-strafeStep)
 		case "left", "q":
 			m.g.turn(-turnStep)
 		case "right", "e":

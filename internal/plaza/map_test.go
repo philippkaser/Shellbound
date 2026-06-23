@@ -82,7 +82,7 @@ func TestFloorIsOpen(t *testing.T) {
 			}
 		}
 	}
-	if open < 3000 {
+	if open < 2000 {
 		t.Errorf("plaza floor suspiciously small: %d open cells", open)
 	}
 }
@@ -118,7 +118,7 @@ func TestPortalTriggers(t *testing.T) {
 			t.Errorf("PortalAt(%d,%d) = %v,%v; want %s", ccx, ccy, got.Key, ok, p.Key)
 		}
 	}
-	if _, ok := PortalAt(50, 32); ok {
-		t.Error("spawn area should not be inside any portal trigger")
+	if _, ok := PortalAt(m.SpawnX, m.SpawnY); ok {
+		t.Error("spawn should not be inside any portal trigger")
 	}
 }

@@ -55,12 +55,11 @@ type Portal struct {
 	X, Y int
 }
 
-// Portals is the 1.0 set, standing against the north wall. All three keys
-// resolve to the "coming soon" placeholder world for now.
+// Portals is the 1.0 set, standing evenly across the north end of the plaza.
 var Portals = []Portal{
-	{Key: "bomberman", Name: "Bomberman", X: 12, Y: 3},
-	{Key: "chess", Name: "Chess", X: 45, Y: 3},
-	{Key: "doom", Name: "Doom", X: 78, Y: 3},
+	{Key: "bomberman", Name: "Bomberman", X: 15, Y: 3},
+	{Key: "chess", Name: "Chess", X: 33, Y: 3},
+	{Key: "doom", Name: "Doom", X: 51, Y: 3},
 }
 
 // PortalHue maps a world key to a stable base hue in [0, 360). A given world

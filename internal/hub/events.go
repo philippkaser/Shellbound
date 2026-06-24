@@ -2,9 +2,10 @@ package hub
 
 // PlayerInfo is the public identity broadcast to other sessions.
 type PlayerInfo struct {
-	ID    int64
-	Name  string
-	Color string // hex personal color
+	ID       int64
+	Name     string
+	Color    string // hex personal color
+	Cosmetic string // equipped headwear key ("" = bare-headed)
 }
 
 // Pos is a plaza position: X is the cell column of the feet, Y the

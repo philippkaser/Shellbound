@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shellbound/shellbound/internal/anim"
+	"github.com/shellbound/shellbound/internal/cosmetic"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
@@ -39,12 +40,13 @@ const (
 
 // playerSnapshot is the minimal per-player data the renderer needs.
 type playerSnapshot struct {
-	id     int64
-	name   string
-	color  string
-	x, y   int // grid feet target (x = cell column, y = half-rows)
-	dir    hub.Dir
-	moving bool
+	id       int64
+	name     string
+	color    string
+	x, y     int // grid feet target (x = cell column, y = half-rows)
+	dir      hub.Dir
+	moving   bool
+	cosmetic string // equipped headwear key
 }
 
 // frameSnapshot is everything the render loop reads. Built cheaply on the
@@ -67,13 +69,14 @@ type frameSnapshot struct {
 
 // entity is a render-side interpolated avatar.
 type entity struct {
-	fx, fy float64 // current smoothed grid position
-	tx, ty float64 // target grid position
-	dir    hub.Dir
-	moving bool
-	name   string
-	color  string
-	seen   bool
+	fx, fy   float64 // current smoothed grid position
+	tx, ty   float64 // target grid position
+	dir      hub.Dir
+	moving   bool
+	name     string
+	color    string
+	cosmetic string
+	seen     bool
 }
 
 // Renderer produces plaza frames on a dedicated goroutine so the heavy Sixel
@@ -269,6 +272,7 @@ func (r *Renderer) updateEntities(snap frameSnapshot) {
 		e.tx, e.ty = tx, ty
 		e.dir, e.moving = p.dir, p.moving
 		e.name, e.color = p.name, p.color
+		e.cosmetic = p.cosmetic
 		e.seen = true
 	}
 	for id, e := range r.ents {
@@ -319,6 +323,7 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 			bob = int(math.Round(math.Sin(t*2.2+float64(i)*1.3) * 0.8))
 		}
 		sprites.Draw(r.screen, footX, footY+bob, sprites.Facing(e.dir), frame, e.moving)
+		cosmetic.Draw(r.screen, footX, footY+bob, sprites.Facing(e.dir), e.cosmetic, t)
 		nameW := canvas.TextWidth(e.name)
 		r.screen.DrawTextShadow(footX-nameW/2, footY+bob-sprites.Height-canvas.LineH, e.name, canvas.Hex(e.color), 0x000000)
 	}
@@ -386,7 +391,7 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 }
 
 func (r *Renderer) drawHUD(snap frameSnapshot, pw, ph int) {
-	hint := "Enter chat · i inventory · f friends · q quit"
+	hint := "Enter chat · i inventory · c wardrobe · f friends · q quit"
 	r.screen.DrawText(pw-canvas.TextWidth(hint)-6, ph-canvas.LineH-4, hint, 0x6E6E6E)
 
 	if snap.unreadName != "" {

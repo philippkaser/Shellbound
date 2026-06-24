@@ -98,7 +98,7 @@ func newApp(deps appDeps, theme style.Theme, fingerprint string, player *storage
 // join registers with the hub and builds the overworld.
 func (a *app) join(player storage.Player) {
 	spawn := hub.Pos{X: a.deps.plazaMap.SpawnX, Y: a.deps.plazaMap.SpawnY*2 + 1}
-	info := hub.PlayerInfo{ID: player.ID, Name: player.Username, Color: player.Color}
+	info := hub.PlayerInfo{ID: player.ID, Name: player.Username, Color: player.Color, Cosmetic: player.Cosmetic}
 	handle, snapshot := a.deps.hub.Join(a.deps.sessionID, info, spawn)
 	a.handle = handle
 	a.over = overworld.New(a.theme, a.deps.plazaMap, a.deps.env, a.deps.repos, player, handle, snapshot)

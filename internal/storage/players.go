@@ -15,6 +15,7 @@ type Player struct {
 	Username    string
 	Color       string // hex, e.g. "#FF5FAF"
 	CreatedAt   time.Time
+	Cosmetic    string // equipped headwear key ("" = bare-headed)
 }
 
 // ErrUsernameTaken is returned by Players.Create when the requested
@@ -26,11 +27,11 @@ type Players struct {
 	db *sql.DB
 }
 
-const playerCols = `id, fingerprint, username, color, created_at`
+const playerCols = `id, fingerprint, username, color, created_at, cosmetic`
 
 func scanPlayer(row *sql.Row) (*Player, error) {
 	var p Player
-	err := row.Scan(&p.ID, &p.Fingerprint, &p.Username, &p.Color, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.Fingerprint, &p.Username, &p.Color, &p.CreatedAt, &p.Cosmetic)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -38,6 +39,14 @@ func scanPlayer(row *sql.Row) (*Player, error) {
 		return nil, fmt.Errorf("storage: scan player: %w", err)
 	}
 	return &p, nil
+}
+
+// SetCosmetic stores the player's equipped headwear key ("" = bare-headed).
+func (r *Players) SetCosmetic(id int64, key string) error {
+	if _, err := r.db.Exec(`UPDATE players SET cosmetic = ? WHERE id = ?`, key, id); err != nil {
+		return fmt.Errorf("storage: set cosmetic: %w", err)
+	}
+	return nil
 }
 
 // ByFingerprint returns the player with the given SSH key fingerprint, or

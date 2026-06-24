@@ -53,6 +53,9 @@ var migrations = []string{
 		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (player_id, world_key)
 	)`,
+	// 6: cosmetics — the player's equipped headwear (empty = bare-headed).
+	// Ownership of unlockable pieces is derived from the inventory.
+	`ALTER TABLE players ADD COLUMN cosmetic TEXT NOT NULL DEFAULT ''`,
 }
 
 // Migrate applies all pending migrations inside the schema_migrations

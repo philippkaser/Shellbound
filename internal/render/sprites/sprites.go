@@ -93,16 +93,30 @@ func limb(c *canvas.Canvas, cx, topY, botY, halfW int, leftShade bool) {
 	}
 }
 
+// Body proportions in pixels (feet at the origin). Promoted to package scope so
+// cosmetics can be placed relative to the head.
+const (
+	legH   = 10
+	torsoH = 14
+	neckH  = 2
+	headR  = 6
+)
+
+// HeadCenter returns the pixel center of the avatar's head for feet at
+// (footX, footY); cosmetics (hats, halos) are drawn relative to it.
+func HeadCenter(footX, footY int) (int, int) {
+	return footX, footY - legH - torsoH - neckH - headR
+}
+
+// HeadRadius returns the head radius in pixels.
+func HeadRadius() int { return headR }
+
 // Draw paints an avatar whose feet rest at pixel (footX, footY). frame selects
 // the walk pose; facing orients the head.
 func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) {
 	const (
-		legH   = 10
-		torsoH = 14
 		shHalf = 8 // shoulder half-width
 		waHalf = 5 // waist half-width
-		neckH  = 2
-		headR  = 6
 	)
 	hipY := footY - legH
 	shoulderY := hipY - torsoH

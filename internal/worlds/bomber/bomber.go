@@ -106,7 +106,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.g.state == won && !m.granted {
 			m.granted = true
 			if m.ctx.Inventory != nil {
-				_ = m.ctx.Inventory.Grant("bomberman.spark_core", "Spark Core", 1)
+				// Unlocks the Sparkforged Crown cosmetic (and shows in the satchel).
+				_ = m.ctx.Inventory.Grant("cosmetic.crown", "Sparkforged Crown", 1)
 			}
 		}
 		m.render()

@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/shellbound/shellbound/internal/cosmetic"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
@@ -21,6 +22,7 @@ import (
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
 	"github.com/shellbound/shellbound/internal/ui/chat"
+	"github.com/shellbound/shellbound/internal/ui/cosmetics"
 	"github.com/shellbound/shellbound/internal/ui/friends"
 	"github.com/shellbound/shellbound/internal/ui/inventory"
 	"github.com/shellbound/shellbound/internal/ui/toast"
@@ -123,11 +125,12 @@ type Model struct {
 
 	remotes map[int64]hub.PlayerState
 
-	chat    chat.Model
-	inv     inventory.Model
-	friends friends.Model
-	toasts  toast.Model
-	unread  map[int64]string // player id -> username with unseen DMs
+	chat     chat.Model
+	inv      inventory.Model
+	friends  friends.Model
+	wardrobe cosmetics.Model
+	toasts   toast.Model
+	unread   map[int64]string // player id -> username with unseen DMs
 
 	termW, termH int
 	cellW, cellH int // pixels per terminal cell; best known estimate
@@ -182,6 +185,7 @@ func New(
 		remotes:  remotes,
 		chat:     chat.New(theme),
 		inv:      inventory.New(theme),
+		wardrobe: cosmetics.New(theme),
 		toasts:   toast.New(theme),
 		unread:   make(map[int64]string),
 	}
@@ -209,11 +213,13 @@ func (m *Model) publish() {
 		players = append(players, playerSnapshot{
 			id: st.Info.ID, name: st.Info.Name, color: st.Info.Color,
 			x: st.Pos.X, y: st.Pos.Y, dir: st.Dir, moving: st.Moving,
+			cosmetic: st.Info.Cosmetic,
 		})
 	}
 	players = append(players, playerSnapshot{
 		id: m.player.ID, name: m.player.Username, color: m.player.Color,
 		x: m.px, y: m.py, dir: m.dir, moving: m.moving,
+		cosmetic: m.player.Cosmetic,
 	})
 
 	var panel []string
@@ -222,6 +228,8 @@ func (m *Model) publish() {
 		panel = m.friends.Lines()
 	case m.inv.IsOpen():
 		panel = m.inv.Lines()
+	case m.wardrobe.IsOpen():
+		panel = m.wardrobe.Lines()
 	}
 
 	var unreadName string
@@ -370,6 +378,10 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.wardrobe.IsOpen() {
+		return m.updateWardrobe(key)
+	}
+
 	// Plaza focus.
 	switch key.String() {
 	case "q":
@@ -383,6 +395,9 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 	case "f":
 		m.friends.Open(m.handle.OnlineIDs())
 		m.unread = make(map[int64]string)
+		return m, nil
+	case "c":
+		m.wardrobe.Open(m.ownedCosmetics(), m.player.Cosmetic)
 		return m, nil
 	}
 	// Movement. The press updates the held intent; pressMove steps instantly on
@@ -468,6 +483,36 @@ func (m Model) updateFriends(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Batch(cmd, m.chat.OpenWith("/w "+target.Username+" "))
 	}
 	return m, cmd
+}
+
+// updateWardrobe routes a key to the wardrobe panel and, when the player
+// equips something, persists it locally, in storage and to the hub.
+func (m Model) updateWardrobe(msg tea.Msg) (Model, tea.Cmd) {
+	cmd := m.wardrobe.Update(msg)
+	if key, ok := m.wardrobe.TakeEquipped(); ok {
+		m.player.Cosmetic = key
+		_ = m.repos.Players.SetCosmetic(m.player.ID, key)
+		m.handle.SetCosmetic(key)
+		m.toasts.Show("now wearing: " + cosmetic.Name(key))
+	}
+	return m, cmd
+}
+
+// ownedCosmetics returns the set of unlockable cosmetic keys the player owns,
+// derived from inventory items granted under the "cosmetic." prefix. Starter
+// pieces are always available and need not appear here.
+func (m Model) ownedCosmetics() map[string]bool {
+	owned := make(map[string]bool)
+	items, err := m.repos.Inventory.Items(m.player.ID)
+	if err != nil {
+		return owned
+	}
+	for _, it := range items {
+		if strings.HasPrefix(it.ItemKey, cosmetic.InventoryPrefix) {
+			owned[strings.TrimPrefix(it.ItemKey, cosmetic.InventoryPrefix)] = true
+		}
+	}
+	return owned
 }
 
 // parseMove maps a key string to a movement vector in whole grid tiles (dx, dy

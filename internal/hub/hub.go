@@ -160,6 +160,20 @@ func (h *Hub) leave(sessionID string) {
 	}
 }
 
+// setCosmetic updates a session's equipped cosmetic and flags it dirty so the
+// next sweep rebroadcasts the new identity to everyone.
+func (h *Hub) setCosmetic(sessionID, key string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s, ok := h.sessions[sessionID]
+	if !ok {
+		return
+	}
+	s.info.Cosmetic = key
+	s.state.Info.Cosmetic = key
+	s.dirty = true
+}
+
 // move records a position update; the sweep broadcasts it.
 func (h *Hub) move(sessionID string, pos Pos, dir Dir, moving bool) {
 	h.mu.Lock()
@@ -251,6 +265,10 @@ func (hd *Handle) Events() <-chan Event { return hd.ch }
 func (hd *Handle) Move(pos Pos, dir Dir, moving bool) {
 	hd.hub.move(hd.sid, pos, dir, moving)
 }
+
+// SetCosmetic updates the player's equipped headwear; peers see it on the
+// next sweep.
+func (hd *Handle) SetCosmetic(key string) { hd.hub.setCosmetic(hd.sid, key) }
 
 // Chat broadcasts a global chat message.
 func (hd *Handle) Chat(text string) { hd.hub.chat(hd.sid, text, false) }

@@ -96,6 +96,7 @@ everyone is shown a short "connect with a Sixel terminal" notice instead.
 | `Shift` + move | Run (two tiles per step)                |
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
 | `i`            | Inventory                               |
+| `c`            | Wardrobe (equip cosmetic headwear)      |
 | `f`            | Friends list (Enter to message someone) |
 | `Esc`          | Close any panel                         |
 | `q` / `Ctrl+C` | Disconnect                              |
@@ -174,16 +175,22 @@ Enter on a name pre-fills a `/w` to them.
   a `Render` handle (the shared palette, the synchronized session writer and
   the cell size) so a world can ship full Sixel frames exactly like the
   plaza. The **Bomberman** portal leads to **The Vault** (`internal/worlds/
-  bomber`): an isometric bomb arena that grants a *Spark Core* when cleared.
-  The **Doom** portal leads to a first-person **raycast shooter**
+  bomber`): an isometric bomb arena that unlocks the *Sparkforged Crown* when
+  cleared. The **Doom** portal leads to a first-person **raycast shooter**
   (`internal/worlds/doom`): perspective walls with brick shading, billboarded
-  imps whose eyes glow in the portal's hue, hitscan firing and a
-  *Hellbreaker's Mark* for clearing the hall. Both paint their accents in the
+  imps whose eyes glow in the portal's hue, hitscan firing, unlocking the
+  *Hellbreaker Horns* for clearing the hall. Both paint their accents in the
   portal's own colour, so a world and its gateway look like one place. Chess
   is still the text "coming soon" placeholder.
+- **Cosmetics.** Headwear worn over the avatar (`internal/cosmetic`), drawn in
+  the same monochrome, overhead-lit style — caps, a top hat, an antenna, plus
+  pieces unlocked by clearing the worlds (crown, horns, halo). The wardrobe
+  panel (`c`) lists what you own (starters ∪ inventory grants keyed
+  `cosmetic.*`); the equipped piece is persisted on the player row and
+  broadcast through the hub so everyone sees it.
 - **Persistence.** Pure-Go SQLite, single writer connection, in-code
-  migrations on startup. Tables: `players`, `friends`, `dms`, `inventory`,
-  `saves`.
+  migrations on startup. Tables: `players` (with equipped cosmetic), `friends`,
+  `dms`, `inventory`, `saves`.
 
 ## Roadmap
 
@@ -206,7 +213,8 @@ internal/storage/    sqlite, migrations, repositories
 internal/world/      World interface, registry, scoped stores + render handle
 internal/worlds/     world implementations (bomber, doom, comingsoon)
 internal/plaza/      map, isometric tiles, portals
-internal/ui/         login, overworld, chat, inventory, friends, toast
+internal/cosmetic/   wearable headwear catalog + rendering
+internal/ui/         login, overworld, chat, inventory, cosmetics, friends, toast
 internal/render/     canvas, sixel, iso, light, sprites, screen, syncwriter
 internal/style/      palette, themes
 internal/anim/       camera spring, flicker helpers

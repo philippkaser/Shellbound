@@ -18,11 +18,11 @@ const (
 
 	orbHalfW = 30 // disc half-width in pixels
 	orbHalfH = 15 // disc half-height (2:1 iso ellipse)
-	orbPixel = 2  // size of one chunky "pixel" block, for a pixel-art look
+	orbPixel = 3  // size of one chunky "pixel" block (bigger = lower-res, calmer)
 
 	// Soft colored bloom on the floor around the gateway (also a 2:1 ellipse).
-	haloHalfW = 56
-	haloHalfH = 28
+	haloHalfW = 72
+	haloHalfH = 36
 )
 
 // Surface shaping: drifting caustics make the pool shimmer like the plaza
@@ -99,6 +99,9 @@ func poolShade(baseHue, nd, bx, by, t float64) canvas.Color {
 		0.07*math.Sin(qy*0.20-t*1.3) +
 		0.05*math.Sin((qx+qy)*0.10+t*2.1)
 	l := orbLightMid - orbRadialFade*nd + shim
+	if nd > 0.7 { // feather the outer rim so it dissolves into the glow
+		l -= (nd - 0.7) * 1.1
+	}
 	hue := baseHue + portalAccentDelta*(0.4+0.3*math.Sin((qx-qy)*0.11+t*1.0))
 	return canvas.HSL(hue, portalSat, clampLight(l))
 }
@@ -147,7 +150,8 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 
 	// The pool itself: an iso ground ellipse of chunky orbPixel blocks so it sits
 	// in the same pixel-art register as the sprites and tiles. nd is the
-	// elliptical (world-circular) distance; the surface shimmers like water.
+	// elliptical (world-circular) distance; the surface shimmers like water, and
+	// the rim feathers out so there's no hard edge (no outline ring).
 	for by := -orbHalfH; by <= orbHalfH; by += orbPixel {
 		for bx := -orbHalfW; bx <= orbHalfW; bx += orbPixel {
 			nx := float64(bx+orbPixel/2) / orbHalfW
@@ -165,9 +169,7 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 		}
 	}
 
-	drawGroundRing(c, ax, cy, baseHue, t)
-
-	// A few motes of the portal's light drift up from the pool and fade — a
+	// A few fat motes of the portal's light drift up from the pool and fade — a
 	// gentle particle effect that hints the gateway is alive.
 	drawParticles(c, ax, cy, baseHue, t)
 
@@ -176,23 +178,32 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 	c.DrawTextShadow(ax-lw/2, cy+orbHalfH+6, p.Name, 0xFFFFFF, 0x000000)
 }
 
-// drawParticles lifts sparse colored motes off the pool, swaying as they rise
-// and fading out — additive, so they glow over whatever is behind them.
+// drawParticles lifts sparse, fat colored motes off the pool, swaying as they
+// rise and fading out — each a soft additive disc so it glows over whatever is
+// behind it.
 func drawParticles(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
-	const n = 8
+	const n = 6
 	for i := 0; i < n; i++ {
 		fi := float64(i)
-		prog := math.Mod(t*0.35+fi*0.317, 1.0) // 0..1 rise life
+		prog := math.Mod(t*0.32+fi*0.41, 1.0) // 0..1 rise life
 		if prog < 0.03 {
 			continue
 		}
-		x := ax + int(7*math.Sin(t*0.9+fi*2.3)) + int((fi-3.5)*4)
-		y := cy - 3 - int(prog*30)
-		l := clampLight(0.25 + 0.4*(1-prog)) // fade as it climbs
-		col := canvas.HSL(baseHue, portalSat, l)
-		c.Set(x, y, c.At(x, y).Lighten(col))
-		c.Set(x+1, y, c.At(x+1, y).Lighten(col.Scale(0.55)))
-		c.Set(x, y+1, c.At(x, y+1).Lighten(col.Scale(0.55)))
+		x := ax + int(8*math.Sin(t*0.8+fi*2.3)) + int((fi-2.5)*5)
+		y := cy - 4 - int(prog*32)
+		fade := 1 - prog
+		core := canvas.HSL(baseHue, portalSat, clampLight(0.28+0.4*fade))
+		// Soft 5px additive disc (radius 2) — fatter than a single pixel.
+		for dy := -2; dy <= 2; dy++ {
+			for dx := -2; dx <= 2; dx++ {
+				d := dx*dx + dy*dy
+				if d > 4 {
+					continue
+				}
+				k := 1 - float64(d)/5
+				c.Set(x+dx, y+dy, c.At(x+dx, y+dy).Lighten(core.Scale(k)))
+			}
+		}
 	}
 }
 
@@ -212,25 +223,10 @@ func (p Portal) GlowCenter(originSx, originSy float64) (int, int) {
 	return int(sx - originSx), int(sy-originSy) + iso.HH
 }
 
-// drawGroundRing paints a faint, breathing rim around the disc's edge — a 2:1
-// iso ellipse of chunky blocks that crisply defines the gateway's mouth.
-func drawGroundRing(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
-	rx, ry := float64(orbHalfW), float64(orbHalfH)
-	l := clampLight(0.40 + 0.08*math.Sin(t*2))
-	col := canvas.HSL(baseHue, portalSat, l)
-	const steps = 96
-	for i := 0; i < steps; i++ {
-		a := float64(i) / steps * 2 * math.Pi
-		// Snap to the chunky pixel grid so the rim matches the disc's blocks.
-		x := ax + (int(rx*math.Cos(a))/orbPixel)*orbPixel
-		y := cy + (int(ry*math.Sin(a))/orbPixel)*orbPixel
-		c.FillRect(x, y, orbPixel, orbPixel, col)
-	}
-}
-
 // softGlow adds a smooth additive bloom over a 2:1 ellipse around (cx, cy),
-// brightest at the center and fading to nothing at the rim with a quadratic
-// falloff (no dither), so the portal's color washes gently onto the floor.
+// brightest at the center and fading to nothing at the rim with a smoothstep
+// falloff (no dither), so the portal's color washes gently onto the floor with
+// no visible edge.
 func softGlow(c *canvas.Canvas, cx, cy, halfW, halfH int, core canvas.Color) {
 	for dy := -halfH; dy <= halfH; dy++ {
 		ny := float64(dy) / float64(halfH)
@@ -241,7 +237,8 @@ func softGlow(c *canvas.Canvas, cx, cy, halfW, halfH int, core canvas.Color) {
 			if d >= 1 {
 				continue
 			}
-			k := (1 - d) * (1 - d) // smooth, edge-soft falloff
+			s := 1 - math.Sqrt(d)
+			k := s * s * (3 - 2*s) // smoothstep — soft shoulders, gentle gradient
 			xx := cx + dx
 			c.Set(xx, yy, c.At(xx, yy).Lighten(core.Scale(k)))
 		}

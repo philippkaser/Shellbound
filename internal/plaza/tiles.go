@@ -4,7 +4,6 @@ import (
 	"math"
 	"sort"
 
-	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
 )
@@ -29,7 +28,6 @@ const (
 	wallH    = 22
 	pillarH  = 34
 	benchH   = 8
-	statueH  = 30
 	lampPost = 32
 )
 
@@ -52,13 +50,19 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 	gx0, gy0 = clampi(gx0, 0, m.W-1), clampi(gy0, 0, m.H-1)
 	gx1, gy1 = clampi(gx1, 0, m.W-1), clampi(gy1, 0, m.H-1)
 
+	// Fountain center (for water ripple rings); -1 if there's no fountain.
+	fcx, fcy := -1, -1
+	if len(m.StatueTops) > 0 {
+		fcx, fcy = m.StatueTops[0].X, m.StatueTops[0].Y
+	}
+
 	// Ground plane (flat, so draw order is irrelevant).
 	for gy := gy0; gy <= gy1; gy++ {
 		for gx := gx0; gx <= gx1; gx++ {
 			px, py := project(gx, gy, originSx, originSy)
 			switch tile := m.Tile(gx, gy); tile {
 			case '~':
-				m.drawWater(c, px, py, gx, gy, t)
+				drawWater(c, px, py, gx, gy, fcx, fcy, t)
 			default:
 				iso.DrawDiamond(c, px, py, toneFloor, toneFloorEdge)
 				if tile == '.' {
@@ -76,7 +80,7 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 	for gy := gy0; gy <= gy1; gy++ {
 		for gx := gx0; gx <= gx1; gx++ {
 			switch m.Tile(gx, gy) {
-			case '#', 'P', 'B', 'F', 'L':
+			case '#', 'P', 'B', 'L': // 'F' (fountain) is drawn as a detailed model below
 				structs = append(structs, cell{gx, gy})
 			}
 		}
@@ -93,46 +97,144 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 			iso.DrawCube(c, px, py, pillarH, toneLight, toneDim, toneMid)
 		case 'B':
 			iso.DrawCube(c, px, py, benchH, toneLight, toneDim, toneMid)
-		case 'F':
-			iso.DrawCube(c, px, py, statueH, toneWhite, toneMid, toneLight)
 		case 'L':
 			m.drawLampPost(c, px, py)
 		}
 	}
 
-	// Fountain spray: a flickering crest above each statue, plus droplets
-	// arcing up and falling back under gravity.
+	// The fountain: a detailed tiered sculpture rising from the pool, with
+	// spilling sheets and fine spray.
 	for _, p := range m.StatueTops {
 		if p.X < gx0 || p.X > gx1 || p.Y < gy0 || p.Y > gy1 {
 			continue
 		}
 		px, py := project(p.X, p.Y, originSx, originSy)
-		ph := anim.Phase(t, 4, 3, p.X)
-		crest := []canvas.Color{toneMid, toneLight, toneMid}[ph]
-		topY := py - statueH
-		c.FillCircle(px, topY-6, 3, crest)
-		c.FillCircle(px, topY-12, 2, toneLight)
-		for d := 0; d < 9; d++ {
-			fd := float64(d)
-			prog := math.Mod(t*1.4+fd*0.27, 1.0) // 0..1 life of a droplet
-			dir := 1.0
-			if d%2 == 0 {
-				dir = -1.0
+		drawFountain(c, px, py+iso.HH, t)
+	}
+}
+
+// drawWater renders an animated pool tile: concentric ripple rings travel
+// outward from the fountain center (fcx, fcy) and a fine per-cell sparkle rides
+// on top, so the surface reads as moving water rather than a flat blink.
+func drawWater(c *canvas.Canvas, px, py, gx, gy, fcx, fcy int, t float64) {
+	dist := math.Hypot(float64(gx-fcx), float64(gy-fcy))
+	ripple := math.Sin(dist*1.9 - t*3.4)
+	sparkle := math.Sin(float64(gx*5+gy*7) + t*3.0)
+	shade := clamp01f(0.5 + 0.42*ripple + 0.10*sparkle)
+	g8 := uint8(34 + 52*shade)
+	iso.DrawDiamond(c, px, py, canvas.RGB(g8, g8, g8), toneShadow)
+}
+
+// fillEllipse fills a 2:1-friendly ellipse (radii rx, ry) centered at (cx, cy).
+func fillEllipse(c *canvas.Canvas, cx, cy, rx, ry int, col canvas.Color) {
+	if rx <= 0 || ry <= 0 {
+		return
+	}
+	for dy := -ry; dy <= ry; dy++ {
+		w := float64(rx) * math.Sqrt(math.Max(0, 1-float64(dy*dy)/float64(ry*ry)))
+		iw := int(w)
+		c.HLine(cx-iw, cx+iw, cy+dy, col)
+	}
+}
+
+// fountProfile is the fountain's silhouette radius at height h above its base:
+// a wide basin bowl, a slim column, then a flared upper bowl.
+func fountProfile(h int) int {
+	switch {
+	case h <= 8:
+		return 18 - h // 18..10 — basin bowl tapering in
+	case h <= 11:
+		return 10 + 2*(h-8) // 10..16 — basin rim flare
+	case h <= 22:
+		return 5 // column
+	case h <= 26:
+		return 5 + 2*(h-22) // 5..13 — upper bowl flare
+	case h <= 30:
+		return 13 // upper bowl rim
+	default:
+		return 0
+	}
+}
+
+// drawFountain paints the tiered stone fountain whose base sits at (ax, groundY):
+// a revolved body shaded like a lit cylinder, two shimmering water surfaces,
+// sheets spilling from the upper bowl, and a fine crest of spray.
+func drawFountain(c *canvas.Canvas, ax, groundY int, t float64) {
+	// Body: a vertical profile, each row shaded left→right for a 3D cylinder.
+	for h := 0; h <= 30; h++ {
+		r := fountProfile(h)
+		if r <= 0 {
+			continue
+		}
+		yy := groundY - h
+		for dx := -r; dx <= r; dx++ {
+			nx := float64(dx) / float64(r)
+			col := toneLight
+			switch {
+			case nx < -0.45:
+				col = toneDim
+			case nx < -0.1:
+				col = toneMid
+			case nx > 0.55:
+				col = toneWhite
 			}
-			dx := int(dir * prog * (5 + fd))
-			dy := int(-30*prog + 36*prog*prog)             // up then accelerating down
-			c.FillRect(px+dx, topY-12+dy, 2, 2, toneLight) // 2x2 droplet
+			c.Set(ax+dx, yy, col)
+		}
+	}
+	// Rim highlights on the two bowls.
+	fillEllipse(c, ax, groundY-11, 16, 4, toneMid)
+	fillEllipse(c, ax, groundY-30, 13, 4, toneMid)
+
+	// Shimmering water surfaces (basin + upper bowl).
+	waterSurface(c, ax, groundY-12, 14, 5, t)
+	waterSurface(c, ax, groundY-31, 11, 4, t)
+
+	// Sheets of water spilling from the upper bowl down toward the basin, as
+	// short bright dashes that travel downward.
+	for i := -2; i <= 2; i++ {
+		sx := ax + i*5
+		phase := math.Mod(t*1.6+float64(i)*0.3, 1.0)
+		for k := 0; k < 3; k++ {
+			yy := groundY - 28 + int((phase+float64(k)*0.34)*16)%16
+			c.Set(sx, yy, toneLight)
+			c.Set(sx, yy+1, toneMid)
+		}
+	}
+
+	// Fine spray from the spout: many small droplets arcing up and falling back.
+	topY := groundY - 32
+	for d := 0; d < 16; d++ {
+		fd := float64(d)
+		prog := math.Mod(t*1.5+fd*0.16, 1.0)
+		ang := fd * 2.4
+		dx := int(math.Cos(ang) * prog * 10)
+		dy := int(-26*prog + 30*prog*prog)
+		c.Set(ax+dx, topY+dy, toneWhite)
+	}
+}
+
+// waterSurface fills a shimmering elliptical pool of water at (cx, cy).
+func waterSurface(c *canvas.Canvas, cx, cy, rx, ry int, t float64) {
+	for dy := -ry; dy <= ry; dy++ {
+		w := float64(rx) * math.Sqrt(math.Max(0, 1-float64(dy*dy)/float64(ry*ry)))
+		iw := int(w)
+		for dx := -iw; dx <= iw; dx++ {
+			rd := math.Hypot(float64(dx)/float64(rx), float64(dy)/float64(ry))
+			shade := clamp01f(0.5 + 0.4*math.Sin(rd*5-t*3.2))
+			g8 := uint8(40 + 46*shade)
+			c.Set(cx+dx, cy+dy, canvas.RGB(g8, g8, g8))
 		}
 	}
 }
 
-// drawWater renders an animated water tile at ground level: the diamond
-// scintillates between grey levels per-cell so the surface shimmers outward
-// rather than blinking in unison.
-func (m *Map) drawWater(c *canvas.Canvas, px, py, gx, gy int, t float64) {
-	levels := []canvas.Color{0x2A2A2A, 0x3A3A3A, 0x505050, 0x3A3A3A}
-	ph := anim.Phase(t, 3, len(levels), gx+gy*3)
-	iso.DrawDiamond(c, px, py, levels[ph], toneShadow)
+func clamp01f(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 // drawLampPost draws the unlit lamp: a slim post with a white head. The glow

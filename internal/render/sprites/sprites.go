@@ -99,7 +99,8 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 	c.FillCircle(footX, headCY, headR, body)
 	c.VLine(footX-headR+1, headCY-2, headCY+2, shade)
 
-	// Facing cues: eyes on the front-facing side, none on the back.
+	// Facing cues: two eyes shifted toward the facing direction; the back of
+	// the head (FaceUp) shows no eyes.
 	switch f {
 	case FaceDown:
 		c.FillCircle(footX-3, headCY, 1, dark)
@@ -107,8 +108,10 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 	case FaceUp:
 		c.FillCircle(footX, headCY-1, 3, shade) // darker crown, no eyes
 	case FaceLeft:
-		c.FillCircle(footX-2, headCY, 1, dark)
+		c.FillCircle(footX-3, headCY, 1, dark)
+		c.FillCircle(footX+1, headCY, 1, dark)
 	case FaceRight:
-		c.FillCircle(footX+2, headCY, 1, dark)
+		c.FillCircle(footX-1, headCY, 1, dark)
+		c.FillCircle(footX+3, headCY, 1, dark)
 	}
 }

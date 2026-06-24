@@ -56,7 +56,10 @@ func (f *Field) Apply(c *canvas.Canvas, lights []Light, ambient float64) {
 				if d2 >= r2 {
 					continue
 				}
-				f.mult[row+x] += l.Power * (1 - d2/r2)
+				// Soft, gently-shouldered falloff (squared) for a smoother pool
+				// of light than a hard linear gradient.
+				s := 1 - d2/r2
+				f.mult[row+x] += l.Power * s * s
 			}
 		}
 	}

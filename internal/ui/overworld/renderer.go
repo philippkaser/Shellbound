@@ -304,17 +304,36 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 	sort.Slice(r.sortBuf, func(i, j int) bool {
 		return r.sortBuf[i].fx+r.sortBuf[i].fy < r.sortBuf[j].fx+r.sortBuf[j].fy
 	})
-	for _, e := range r.sortBuf {
+	for i, e := range r.sortBuf {
 		sx, sy := iso.Project(e.fx, e.fy)
 		footX := int(sx - originSx)
 		footY := int(sy-originSy) + iso.HH
-		frame := 0
+		// A soft oval contact shadow grounds the avatar.
+		drawShadow(r.screen, footX, footY)
+		frame, bob := 0, 0
 		if e.moving {
 			frame = int(t * 8)
+		} else {
+			// Gentle idle breathing so a standing avatar isn't perfectly static.
+			bob = int(math.Round(math.Sin(t*2.2+float64(i)*1.3) * 0.8))
 		}
-		sprites.Draw(r.screen, footX, footY, sprites.Facing(e.dir), frame, e.moving)
+		sprites.Draw(r.screen, footX, footY+bob, sprites.Facing(e.dir), frame, e.moving)
 		nameW := canvas.TextWidth(e.name)
-		r.screen.DrawTextShadow(footX-nameW/2, footY-sprites.Height-canvas.LineH, e.name, canvas.Hex(e.color), 0x000000)
+		r.screen.DrawTextShadow(footX-nameW/2, footY+bob-sprites.Height-canvas.LineH, e.name, canvas.Hex(e.color), 0x000000)
+	}
+}
+
+// drawShadow darkens the floor under an avatar's feet into a soft 2:1 oval so
+// the figure feels grounded rather than floating.
+func drawShadow(c *canvas.Canvas, footX, footY int) {
+	const rx, ry = 8, 4
+	for dy := -ry; dy <= ry; dy++ {
+		w := float64(rx) * math.Sqrt(math.Max(0, 1-float64(dy*dy)/float64(ry*ry)))
+		iw := int(w)
+		yy := footY + dy - 1
+		for dx := -iw; dx <= iw; dx++ {
+			c.Set(footX+dx, yy, c.At(footX+dx, yy).Scale(0.55))
+		}
 	}
 }
 
@@ -322,9 +341,11 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 	lights := make([]light.Light, 0, len(r.world.Lamps)+1)
 	if self := r.ents[snap.selfID]; self != nil {
 		sx, sy := iso.Project(self.fx, self.fy)
+		// The lantern you carry breathes a little so the world feels alive.
+		pulse := 0.9 + 0.1*math.Sin(t*1.7)
 		lights = append(lights, light.Light{
 			X: int(sx - originSx), Y: int(sy-originSy) + iso.HH - 18,
-			Radius: 120, Power: 0.8,
+			Radius: 165, Power: 0.85 * pulse,
 		})
 	}
 
@@ -339,7 +360,7 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 			continue
 		}
 		k := anim.Flicker(t, p.X*31+p.Y*7)
-		lights = append(lights, light.Light{X: hx, Y: hy, Radius: 130, Power: 0.6 * k})
+		lights = append(lights, light.Light{X: hx, Y: hy, Radius: 165, Power: 0.65 * k})
 		glows = append(glows, glowSpec{hx, hy, k})
 	}
 
@@ -350,7 +371,7 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 		if gx < -150 || gx > pw+150 || gy < -150 || gy > ph+150 {
 			continue
 		}
-		lights = append(lights, light.Light{X: gx, Y: gy, Radius: 110, Power: 0.4})
+		lights = append(lights, light.Light{X: gx, Y: gy, Radius: 140, Power: 0.45})
 	}
 
 	r.lights.Apply(r.screen, lights, ambientLight)

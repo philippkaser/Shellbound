@@ -12,6 +12,8 @@ import (
 // the only color comes from portals and player names).
 const (
 	toneFloor     = canvas.Color(0x0C0C0C)
+	toneFloorB    = canvas.Color(0x111111) // alternate paving tone (checker)
+	tonePaving    = canvas.Color(0x202020) // pale flagstone ring around the fountain
 	toneFloorEdge = canvas.Color(0x1A1A1A)
 	toneSpeck     = canvas.Color(0x383838)
 	toneSpeckDim  = canvas.Color(0x242424)
@@ -56,7 +58,9 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		fcx, fcy = m.StatueTops[0].X, m.StatueTops[0].Y
 	}
 
-	// Ground plane (flat, so draw order is irrelevant).
+	// Ground plane (flat, so draw order is irrelevant). The floor alternates
+	// between two near-black tones for a paved texture, and a ring of paler
+	// flagstones rings the fountain.
 	for gy := gy0; gy <= gy1; gy++ {
 		for gx := gx0; gx <= gx1; gx++ {
 			px, py := project(gx, gy, originSx, originSy)
@@ -64,7 +68,16 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 			case '~':
 				drawWater(c, px, py, gx, gy, fcx, fcy, t)
 			default:
-				iso.DrawDiamond(c, px, py, toneFloor, toneFloorEdge)
+				fill := toneFloor
+				if (gx+gy)&1 == 0 {
+					fill = toneFloorB
+				}
+				if fcx >= 0 {
+					if d := math.Hypot(float64(gx-fcx), float64(gy-fcy)); d >= 4 && d < 5.4 {
+						fill = tonePaving // decorative ring around the pool
+					}
+				}
+				iso.DrawDiamond(c, px, py, fill, toneFloorEdge)
 				if tile == '.' {
 					c.Set(px, py+iso.HH, toneSpeck)
 				} else if tile == ',' {
@@ -74,23 +87,14 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		}
 	}
 
-	// Structures, painter-sorted back-to-front so near cubes overlap far ones.
-	type cell struct{ gx, gy int }
-	var structs []cell
-	for gy := gy0; gy <= gy1; gy++ {
-		for gx := gx0; gx <= gx1; gx++ {
-			switch m.Tile(gx, gy) {
-			case '#', 'P', 'B', 'L': // 'F' (fountain) is drawn as a detailed model below
-				structs = append(structs, cell{gx, gy})
-			}
+	// Structures: iterate the pre-sorted (back-to-front) list, culling cells
+	// outside the visible range — no per-frame collect or sort.
+	for _, s := range m.structures {
+		if s.X < gx0 || s.X > gx1 || s.Y < gy0 || s.Y > gy1 {
+			continue
 		}
-	}
-	sort.Slice(structs, func(i, j int) bool {
-		return iso.Depth(structs[i].gx, structs[i].gy) < iso.Depth(structs[j].gx, structs[j].gy)
-	})
-	for _, s := range structs {
-		px, py := project(s.gx, s.gy, originSx, originSy)
-		switch m.Tile(s.gx, s.gy) {
+		px, py := project(s.X, s.Y, originSx, originSy)
+		switch s.tile {
 		case '#':
 			iso.DrawCube(c, px, py, wallH, toneMid, toneDark, toneDim)
 		case 'P':
@@ -111,6 +115,24 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		px, py := project(p.X, p.Y, originSx, originSy)
 		drawFountain(c, px, py+iso.HH, t)
 	}
+}
+
+// buildStructures collects every solid cube cell ('#', 'P', 'B', 'L'; the
+// fountain 'F' is drawn separately) and sorts it back-to-front once, so the
+// per-frame render is a simple cull-and-draw.
+func (m *Map) buildStructures() {
+	for cy := 0; cy < m.H; cy++ {
+		for cx := 0; cx < m.W; cx++ {
+			switch t := m.tiles[cy*m.W+cx]; t {
+			case '#', 'P', 'B', 'L':
+				m.structures = append(m.structures, structCell{cx, cy, t})
+			}
+		}
+	}
+	sort.Slice(m.structures, func(i, j int) bool {
+		return iso.Depth(m.structures[i].X, m.structures[i].Y) <
+			iso.Depth(m.structures[j].X, m.structures[j].Y)
+	})
 }
 
 // drawWater renders an animated pool tile: concentric ripple rings travel

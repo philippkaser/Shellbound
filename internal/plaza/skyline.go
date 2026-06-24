@@ -1,6 +1,8 @@
 package plaza
 
 import (
+	"sort"
+
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
 )
@@ -22,25 +24,21 @@ const (
 	skylineStep  = 2
 )
 
-// tower is one skyscraper just outside the plaza, on the back (north/west) edges
-// where it sits behind the plaza in the isometric view.
-type tower struct {
+// towerCell is one skyscraper just outside the plaza, on the back (north/west)
+// edges where it sits behind the plaza in the isometric view.
+type towerCell struct {
 	gx, gy, h int
 }
 
-// renderSkyline draws a city of towers ringing the plaza's two back edges, so
-// the plaza feels like a small clearing in a big, lived-in place. Towers are
-// drawn before the ground (everything in the plaza paints over them) and only
-// beyond the north/west edges, so they never occlude the player.
-func (m *Map) renderSkyline(c *canvas.Canvas, originSx, originSy float64) {
-	towers := make([]tower, 0, 256)
+// buildSkyline computes the ring of background towers once (deterministic
+// heights, pre-sorted back-to-front) so the per-frame render only culls.
+func (m *Map) buildSkyline() {
 	add := func(gx, gy int) {
-		// Deterministic per-position height so the skyline is stable.
 		seed := gx*73856093 ^ gy*19349663
 		if seed < 0 {
 			seed = -seed
 		}
-		towers = append(towers, tower{gx, gy, 44 + seed%78})
+		m.skyline = append(m.skyline, towerCell{gx, gy, 44 + seed%78})
 	}
 	for d := 2; d <= skylineDepth+1; d++ {
 		for gx := -8; gx < m.W+8; gx += skylineStep {
@@ -50,13 +48,17 @@ func (m *Map) renderSkyline(c *canvas.Canvas, originSx, originSy float64) {
 			add(-d, gy) // west band
 		}
 	}
-	// Back-to-front so nearer towers overlap farther ones.
-	for i := 1; i < len(towers); i++ {
-		for j := i; j > 0 && towers[j].gx+towers[j].gy < towers[j-1].gx+towers[j-1].gy; j-- {
-			towers[j], towers[j-1] = towers[j-1], towers[j]
-		}
-	}
-	for _, t := range towers {
+	sort.Slice(m.skyline, func(i, j int) bool {
+		return m.skyline[i].gx+m.skyline[i].gy < m.skyline[j].gx+m.skyline[j].gy
+	})
+}
+
+// renderSkyline draws the precomputed city behind the plaza's two back edges,
+// so the plaza feels like a small clearing in a big, lived-in place. Drawn
+// before the ground (everything paints over them) and only beyond the
+// north/west edges, so they never occlude the player.
+func (m *Map) renderSkyline(c *canvas.Canvas, originSx, originSy float64) {
+	for _, t := range m.skyline {
 		px, py := project(t.gx, t.gy, originSx, originSy)
 		if px < -iso.HW-4 || px > c.W+iso.HW+4 || py-t.h > c.H || py < -t.h {
 			continue // off-screen

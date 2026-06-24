@@ -85,10 +85,11 @@ type Renderer struct {
 	out   *syncwriter.Writer
 	world *plaza.Map
 
-	screen  *canvas.Canvas
-	sb      *strings.Builder
-	lights  *light.Field
-	sortBuf []*entity
+	screen   *canvas.Canvas
+	sb       *strings.Builder
+	lights   *light.Field
+	sortBuf  []*entity
+	lightBuf []light.Light // reused each frame to avoid per-frame allocation
 
 	mu   sync.Mutex
 	snap frameSnapshot
@@ -338,7 +339,7 @@ func drawShadow(c *canvas.Canvas, footX, footY int) {
 }
 
 func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float64, pw, ph int) {
-	lights := make([]light.Light, 0, len(r.world.Lamps)+1)
+	lights := r.lightBuf[:0]
 	if self := r.ents[snap.selfID]; self != nil {
 		sx, sy := iso.Project(self.fx, self.fy)
 		// The lantern you carry breathes a little so the world feels alive.
@@ -373,6 +374,7 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 		}
 		lights = append(lights, light.Light{X: gx, Y: gy, Radius: 140, Power: 0.45})
 	}
+	r.lightBuf = lights // retain backing array for reuse next frame
 
 	r.lights.Apply(r.screen, lights, ambientLight)
 

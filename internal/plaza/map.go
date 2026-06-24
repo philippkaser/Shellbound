@@ -85,6 +85,20 @@ type Map struct {
 	Lamps      []Point
 	Water      []Point
 	StatueTops []Point
+
+	// structures is every solid cube cell (walls, pillars, benches, lamps)
+	// pre-sorted back-to-front, and skyline is the city of background towers.
+	// Both are built once and read-only, so the per-frame render only iterates
+	// and culls — no allocation or sorting per frame, and safe to share across
+	// the session render goroutines.
+	structures []structCell
+	skyline    []towerCell
+}
+
+// structCell is one pre-sorted solid cell in the plaza.
+type structCell struct {
+	X, Y int
+	tile byte
 }
 
 // blockingTiles is derived from the legend above.
@@ -158,6 +172,8 @@ func Load() *Map {
 			}
 		}
 	}
+	m.buildStructures()
+	m.buildSkyline()
 	return m
 }
 

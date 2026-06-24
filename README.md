@@ -117,9 +117,15 @@ Enter on a name pre-fills a `/w` to them.
 - **Rendering.** The plaza is baked into a true RGB pixel framebuffer
   (`internal/render/canvas`) and shipped as one Sixel image per frame
   (`internal/render/sixel`, a fixed-palette run-length encoder). The world is
-  projected to a 2:1 **isometric** screen space (`internal/render/iso`): ground
-  diamonds and depth-sorted extruded cubes for walls, pillars, benches and the
-  fountain. Avatars are procedural pixel art (`internal/render/sprites`); text
+  projected to a 2:1 **isometric** screen space (`internal/render/iso`): paved
+  ground diamonds and depth-sorted extruded cubes for walls, pillars and
+  benches, a detailed tiered **fountain** (rippling pool, spilling sheets, fine
+  spray) and a **city skyline** of towers ringing the back edges. The solid
+  structures and the skyline are indexed and pre-sorted once at load, so the
+  per-frame render only culls and draws — no allocation or sorting per frame.
+  Avatars are procedural pixel art (`internal/render/sprites`) — hooded, cloaked
+  figures with swinging arms, an idle breathing bob and a soft contact shadow;
+  text
   (names, chat, HUD, panels) is baked with a 5×7 bitmap font so the entire frame
   composites in one place. **Interactive lighting** (`internal/render/light`)
   dims the plaza and lets the player and lamps reveal it, with blocky glow

@@ -69,7 +69,9 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 	c.FillRect(rx-legW/2, hipY, legW, rFoot-hipY, body)
 	c.VLine(lx-legW/2, hipY, lFoot-1, shade) // volume on the shadow side
 
-	// Arms swing opposite the legs: the lower end (hand) lifts and drops.
+	// Arms swing opposite the legs: the hand lifts and drops. Both are lit; the
+	// shadow lives on the figure's outline, and a thin seam separates the right
+	// arm from the torso.
 	armTop := shoulderY + 2
 	lHand, rHand := armTop+armH, armTop+armH
 	if moving {
@@ -81,19 +83,21 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 			rHand -= 3
 		}
 	}
-	c.FillRect(tx-armW+1, armTop, armW, lHand-armTop, shade)  // far/shadow arm
-	c.FillRect(tx+torsoW-1, armTop, armW, rHand-armTop, body) // near/lit arm
-	c.VLine(tx-armW+1, armTop, lHand-1, dark)
+	laX, raX := tx-armW, tx+torsoW
+	c.FillRect(laX, armTop, armW, lHand-armTop, body)
+	c.FillRect(raX, armTop, armW, rHand-armTop, body)
+	c.VLine(laX, armTop, lHand-1, shade) // shadow contour down the left arm
+	c.VLine(raX, armTop, rHand-1, shade) // seam between the right arm and torso
 
-	// Torso: a rounded block, lit on the right, shaded on the left, with a
-	// dark belt for definition.
+	// Torso: a rounded block with a thin shadow down its left edge and a dark
+	// belt for definition.
 	c.FillRect(tx, shoulderY, torsoW, torsoH, body)
-	c.FillRect(tx, shoulderY, 4, torsoH, shade)
+	c.FillRect(tx, shoulderY, 2, torsoH, shade)
 	c.FillRect(tx, hipY-3, torsoW, 2, dark)
 
-	// Head.
+	// Head: a thin shadow on the left rim only — clear of the eyes.
 	c.FillCircle(footX, headCY, headR, body)
-	c.FillCircle(footX-2, headCY, 2, shade) // shaded cheek
+	c.VLine(footX-headR+1, headCY-2, headCY+2, shade)
 
 	// Facing cues: eyes on the front-facing side, none on the back.
 	switch f {
@@ -103,10 +107,8 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 	case FaceUp:
 		c.FillCircle(footX, headCY-1, 3, shade) // darker crown, no eyes
 	case FaceLeft:
-		c.FillCircle(footX-3, headCY, 1, dark)
-		c.VLine(footX+headR-1, headCY-3, headCY+3, shade)
+		c.FillCircle(footX-2, headCY, 1, dark)
 	case FaceRight:
-		c.FillCircle(footX+3, headCY, 1, dark)
-		c.VLine(footX-headR+1, headCY-3, headCY+3, shade)
+		c.FillCircle(footX+2, headCY, 1, dark)
 	}
 }

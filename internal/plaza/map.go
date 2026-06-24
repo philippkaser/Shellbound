@@ -13,6 +13,7 @@
 //	'~'  fountain water (blocks, animated)
 //	'F'  fountain statue; vertical pair like pillars (blocks)
 //	'L'  lamp post (blocks; its glowing head is drawn one cell above)
+//	'H'  cosmetics shop stall (blocks; walk up to an adjacent tile to trade)
 //	's'  spawn point (floor; marker is stripped at load)
 //
 // Rows shorter than Width are padded with floor; extra rows/columns are
@@ -59,7 +60,7 @@ const layout = `################################################################
 ##                                ,                                   .   ##
 ##        L                                         .   .        L        ##
 ##      ,                  ,                                    ,         ##
-##                                    s                 ,              .  ##
+##                            H       s                 ,              .  ##
 ##  .         ,  , .                           ,                          ##
 ##                        ,          ,       ,                   ,        ##
 ##        .  ,                                       .                    ##
@@ -81,10 +82,12 @@ type Map struct {
 	// SpawnX/SpawnY is the spawn cell (where 's' was in the layout).
 	SpawnX, SpawnY int
 	// Lamps, Water and StatueTops index the animated cells so the
-	// per-frame pass never scans the whole grid.
+	// per-frame pass never scans the whole grid. Shops indexes the cosmetics
+	// stall cells (where the player can open the shop from an adjacent tile).
 	Lamps      []Point
 	Water      []Point
 	StatueTops []Point
+	Shops      []Point
 
 	// structures is every solid cube cell (walls, pillars, benches, lamps)
 	// pre-sorted back-to-front, and skyline is the city of background towers.
@@ -104,7 +107,7 @@ type structCell struct {
 // blockingTiles is derived from the legend above.
 func blocking(t byte) bool {
 	switch t {
-	case '#', 'P', 'B', '~', 'F', 'L':
+	case '#', 'P', 'B', '~', 'F', 'L', 'H':
 		return true
 	}
 	return false
@@ -169,6 +172,8 @@ func Load() *Map {
 				if cy+1 < Height && m.tiles[(cy+1)*Width+cx] == 'F' {
 					m.StatueTops = append(m.StatueTops, Point{cx, cy})
 				}
+			case 'H':
+				m.Shops = append(m.Shops, Point{cx, cy})
 			}
 		}
 	}
@@ -192,4 +197,23 @@ func (m *Map) Blocked(x, y int) bool {
 		return true
 	}
 	return m.collide[y*m.W+x]
+}
+
+// NearShop reports whether feet at cell (cx, cy) are standing next to a shop
+// stall — within one tile (the 3×3 around any stall cell), so a player walks up
+// to the counter and trades from the adjacent floor rather than on top of it.
+func (m *Map) NearShop(cx, cy int) bool {
+	for _, s := range m.Shops {
+		if abs(cx-s.X) <= 1 && abs(cy-s.Y) <= 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

@@ -16,6 +16,7 @@ type Player struct {
 	Color       string // hex, e.g. "#FF5FAF"
 	CreatedAt   time.Time
 	Cosmetic    string // equipped headwear key ("" = bare-headed)
+	Coins       int    // soft currency earned online, spent at the shop
 }
 
 // ErrUsernameTaken is returned by Players.Create when the requested
@@ -27,11 +28,11 @@ type Players struct {
 	db *sql.DB
 }
 
-const playerCols = `id, fingerprint, username, color, created_at, cosmetic`
+const playerCols = `id, fingerprint, username, color, created_at, cosmetic, coins`
 
 func scanPlayer(row *sql.Row) (*Player, error) {
 	var p Player
-	err := row.Scan(&p.ID, &p.Fingerprint, &p.Username, &p.Color, &p.CreatedAt, &p.Cosmetic)
+	err := row.Scan(&p.ID, &p.Fingerprint, &p.Username, &p.Color, &p.CreatedAt, &p.Cosmetic, &p.Coins)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -47,6 +48,50 @@ func (r *Players) SetCosmetic(id int64, key string) error {
 		return fmt.Errorf("storage: set cosmetic: %w", err)
 	}
 	return nil
+}
+
+// AddCoins credits n coins to a player and returns the new balance. n must be
+// positive.
+func (r *Players) AddCoins(id int64, n int) (int, error) {
+	if n <= 0 {
+		return 0, fmt.Errorf("storage: add coins must be positive, got %d", n)
+	}
+	if _, err := r.db.Exec(`UPDATE players SET coins = coins + ? WHERE id = ?`, n, id); err != nil {
+		return 0, fmt.Errorf("storage: add coins: %w", err)
+	}
+	return r.coins(id)
+}
+
+// SpendCoins atomically deducts cost coins if the player can afford it,
+// reporting whether the charge went through and the resulting balance. The
+// guard in the UPDATE makes the check-and-debit a single statement, so two
+// concurrent purchases can never overdraw.
+func (r *Players) SpendCoins(id int64, cost int) (ok bool, balance int, err error) {
+	if cost < 0 {
+		return false, 0, fmt.Errorf("storage: spend cost must be non-negative, got %d", cost)
+	}
+	res, err := r.db.Exec(`UPDATE players SET coins = coins - ? WHERE id = ? AND coins >= ?`, cost, id, cost)
+	if err != nil {
+		return false, 0, fmt.Errorf("storage: spend coins: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, 0, fmt.Errorf("storage: spend coins rows: %w", err)
+	}
+	balance, err = r.coins(id)
+	if err != nil {
+		return false, 0, err
+	}
+	return n == 1, balance, nil
+}
+
+// coins reads a player's current coin balance.
+func (r *Players) coins(id int64) (int, error) {
+	var n int
+	if err := r.db.QueryRow(`SELECT coins FROM players WHERE id = ?`, id).Scan(&n); err != nil {
+		return 0, fmt.Errorf("storage: read coins: %w", err)
+	}
+	return n, nil
 }
 
 // ByFingerprint returns the player with the given SSH key fingerprint, or

@@ -56,6 +56,9 @@ var migrations = []string{
 	// 6: cosmetics — the player's equipped headwear (empty = bare-headed).
 	// Ownership of unlockable pieces is derived from the inventory.
 	`ALTER TABLE players ADD COLUMN cosmetic TEXT NOT NULL DEFAULT ''`,
+	// 7: coins — the soft currency earned passively while online and spent at
+	// the plaza cosmetics shop.
+	`ALTER TABLE players ADD COLUMN coins INTEGER NOT NULL DEFAULT 0`,
 }
 
 // Migrate applies all pending migrations inside the schema_migrations

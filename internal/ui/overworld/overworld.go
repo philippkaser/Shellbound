@@ -25,6 +25,7 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/cosmetics"
 	"github.com/shellbound/shellbound/internal/ui/friends"
 	"github.com/shellbound/shellbound/internal/ui/inventory"
+	"github.com/shellbound/shellbound/internal/ui/shop"
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
 
@@ -44,6 +45,16 @@ const (
 	moveTickEvery = 120 * time.Millisecond // one tile per tick while a direction is held
 	tapWindow     = 110 * time.Millisecond // < moveTickEvery: a single tap walks exactly one tile
 	holdSteady    = 170 * time.Millisecond // a key whose repeats have begun keeps the walk alive
+)
+
+// Coins accrue passively while the player is in the plaza: one coin every
+// coinEvery, persisted as it lands. The cadence is deliberately slow so a
+// cosmetic is a goal you earn over a session rather than something you grind out
+// in a minute. Time spent inside a portal world doesn't pay (the baseline resets
+// on return), so coins reward hanging around the shared plaza.
+const (
+	coinEvery     = 20 * time.Second
+	coinsPerAward = 1
 )
 
 // Minimum playable terminal size.
@@ -129,8 +140,11 @@ type Model struct {
 	inv      inventory.Model
 	friends  friends.Model
 	wardrobe cosmetics.Model
+	shop     shop.Model
 	toasts   toast.Model
 	unread   map[int64]string // player id -> username with unseen DMs
+
+	lastCoinAt time.Time // when the last passive coin was credited
 
 	termW, termH int
 	cellW, cellH int // pixels per terminal cell; best known estimate
@@ -186,8 +200,11 @@ func New(
 		chat:     chat.New(theme),
 		inv:      inventory.New(theme),
 		wardrobe: cosmetics.New(theme),
+		shop:     shop.New(theme),
 		toasts:   toast.New(theme),
 		unread:   make(map[int64]string),
+
+		lastCoinAt: time.Now(),
 	}
 	m.friends = friends.New(theme, repos, player)
 	m.chat.AddSystem("welcome to shellbound — /help for commands")
@@ -230,7 +247,14 @@ func (m *Model) publish() {
 		panel = m.inv.Lines()
 	case m.wardrobe.IsOpen():
 		panel = m.wardrobe.Lines()
+	case m.shop.IsOpen():
+		panel = m.shop.Lines()
 	}
+
+	// The "press e to shop" nudge shows only when standing next to the stall
+	// with nothing else holding focus.
+	shopPrompt := m.world.NearShop(m.px, m.py/2) &&
+		!m.chat.IsOpen() && len(panel) == 0
 
 	var unreadName string
 	var unreadN int
@@ -258,6 +282,8 @@ func (m *Model) publish() {
 		chatOpen:   m.chat.IsOpen(),
 		unreadName: unreadName,
 		unreadN:    unreadN,
+		coins:      m.player.Coins,
+		shopPrompt: shopPrompt,
 	})
 }
 
@@ -317,6 +343,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.moving = false
 			m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
 		}
+		m.accrueCoins()
 		m.publish()
 		return m, animTick()
 
@@ -382,10 +409,19 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m.updateWardrobe(key)
 	}
 
+	if m.shop.IsOpen() {
+		return m.updateShop(key)
+	}
+
 	// Plaza focus.
 	switch key.String() {
 	case "q":
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "bye"} }
+	case "e":
+		if m.world.NearShop(m.px, m.py/2) {
+			m.shop.Open(m.ownedCosmetics(), m.player.Coins)
+		}
+		return m, nil
 	case "enter":
 		return m, m.chat.Open()
 	case "i":
@@ -448,7 +484,7 @@ func (m Model) tickMove() (Model, tea.Cmd) {
 		return m, nil
 	}
 	// A panel or the chat console stole focus — stop walking.
-	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() {
+	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() {
 		return m.stopWalk(), nil
 	}
 	window := tapWindow
@@ -496,6 +532,74 @@ func (m Model) updateWardrobe(msg tea.Msg) (Model, tea.Cmd) {
 		m.toasts.Show("now wearing: " + cosmetic.Name(key))
 	}
 	return m, cmd
+}
+
+// updateShop routes a key to the shop panel and, when the player buys
+// something, charges their coins, grants the cosmetic and refreshes the panel.
+func (m Model) updateShop(msg tea.Msg) (Model, tea.Cmd) {
+	cmd := m.shop.Update(msg)
+	if key, ok := m.shop.TakePurchase(); ok {
+		m.buyCosmetic(key)
+		m.shop.SetState(m.ownedCosmetics(), m.player.Coins)
+	}
+	return m, cmd
+}
+
+// buyCosmetic performs a purchase: it re-checks ownership, atomically debits the
+// price (so a slow connection can't double-spend), grants the cosmetic as an
+// inventory item and reports the outcome through a toast.
+func (m *Model) buyCosmetic(key string) {
+	if !cosmetic.Valid(key) {
+		return
+	}
+	if m.ownedCosmetics()[key] {
+		m.toasts.Show("you already own that")
+		return
+	}
+	price := cosmetic.Price(key)
+	if price <= 0 {
+		m.toasts.Show("not for sale")
+		return
+	}
+	ok, balance, err := m.repos.Players.SpendCoins(m.player.ID, price)
+	if err != nil {
+		m.toasts.Show("the till is jammed — try again")
+		return
+	}
+	m.player.Coins = balance
+	if !ok {
+		m.toasts.Show("not enough coins for " + cosmetic.Name(key))
+		return
+	}
+	if err := m.repos.Inventory.Grant(m.player.ID, "plaza", cosmetic.InventoryPrefix+key, cosmetic.Name(key), 1); err != nil {
+		// The coins are already gone; refund so the player isn't out of pocket.
+		if bal, rerr := m.repos.Players.AddCoins(m.player.ID, price); rerr == nil {
+			m.player.Coins = bal
+		}
+		m.toasts.Show("the shelf was empty — refunded")
+		return
+	}
+	m.toasts.Show("bought " + cosmetic.Name(key) + " — wear it with c")
+}
+
+// accrueCoins credits the slow passive income for being in the plaza, persisting
+// each coin as it lands. It awards every whole coinEvery that has elapsed (so a
+// brief stall doesn't lose income) and keeps the local balance in sync for the
+// HUD and shop.
+func (m *Model) accrueCoins() {
+	awarded := 0
+	for time.Since(m.lastCoinAt) >= coinEvery {
+		m.lastCoinAt = m.lastCoinAt.Add(coinEvery)
+		awarded += coinsPerAward
+	}
+	if awarded == 0 {
+		return
+	}
+	if balance, err := m.repos.Players.AddCoins(m.player.ID, awarded); err == nil {
+		m.player.Coins = balance
+	} else {
+		m.player.Coins += awarded // keep the HUD honest even if the write hiccups
+	}
 }
 
 // ownedCosmetics returns the set of unlockable cosmetic keys the player owns,
@@ -661,6 +765,13 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 // presence-dependent UI.
 func (m Model) ResumeFromWorld() Model {
 	m.renderer.SetActive(true)
+	// Don't pay out a lump for time spent inside the world; restart the clock.
+	m.lastCoinAt = time.Now()
+	// The player may have just earned a reward cosmetic in there; pick up the
+	// fresh coin balance too in case another session credited it.
+	if p, err := m.repos.Players.ByID(m.player.ID); err == nil && p != nil {
+		m.player.Coins = p.Coins
+	}
 	return m
 }
 

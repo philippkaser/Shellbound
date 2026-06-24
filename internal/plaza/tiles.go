@@ -33,6 +33,14 @@ const (
 	lampPost = 32
 )
 
+// Cosmetics shop stall dimensions in pixels.
+const (
+	shopCounterH   = 13 // height of the trading counter body
+	shopAwningRise = 14 // post height from the counter top to the awning
+	shopValanceH   = 5  // length of the striped fringe hanging off the awning
+	shopStripeW    = 4  // width of one awning stripe
+)
+
 // project converts a cell to its ground-diamond top vertex in canvas pixels,
 // given the screen-space origin at the canvas's top-left.
 func project(gx, gy int, originSx, originSy float64) (int, int) {
@@ -103,6 +111,8 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 			iso.DrawCube(c, px, py, benchH, toneLight, toneDim, toneMid)
 		case 'L':
 			m.drawLampPost(c, px, py)
+		case 'H':
+			drawShop(c, px, py)
 		}
 	}
 
@@ -124,7 +134,7 @@ func (m *Map) buildStructures() {
 	for cy := 0; cy < m.H; cy++ {
 		for cx := 0; cx < m.W; cx++ {
 			switch t := m.tiles[cy*m.W+cx]; t {
-			case '#', 'P', 'B', 'L':
+			case '#', 'P', 'B', 'L', 'H':
 				m.structures = append(m.structures, structCell{cx, cy, t})
 			}
 		}
@@ -273,6 +283,58 @@ func (m *Map) drawLampPost(c *canvas.Canvas, px, py int) {
 func LampHead(gx, gy int, originSx, originSy float64) (int, int) {
 	px, py := project(gx, gy, originSx, originSy)
 	return px, py + iso.HH - lampPost
+}
+
+// drawShop paints the cosmetics stall whose ground-diamond top vertex is at
+// (px, py): a stone counter, two posts holding a striped market awning, and a
+// floating "Shop" sign so it reads as a place you walk up to and trade.
+func drawShop(c *canvas.Canvas, px, py int) {
+	iso.DrawCube(c, px, py, shopCounterH, toneLight, toneDim, toneMid)
+	topY := py - shopCounterH    // top vertex of the counter's top diamond
+	awY := topY - shopAwningRise // top vertex of the awning slab
+
+	// Two posts linking the counter's side corners up to the awning corners.
+	for _, postX := range []int{px - iso.HW + 1, px + iso.HW - 1} {
+		c.FillRect(postX-1, awY+iso.HH, 2, shopAwningRise, toneMid)
+	}
+
+	// The awning roof: a flat lit diamond over the posts.
+	iso.DrawDiamond(c, px, awY, toneWhite, toneMid)
+
+	// A striped valance hanging off the awning's two front edges (alternating
+	// light/dark blocks — the classic market-stall scallop). The edge math
+	// mirrors iso.DrawCube's lower-left / lower-right edges.
+	for dx := -iso.HW; dx <= 0; dx++ {
+		drawValance(c, px+dx, awY+iso.HH+(dx+iso.HW)/2, dx)
+	}
+	for dx := 1; dx <= iso.HW; dx++ {
+		drawValance(c, px+dx, awY+iso.TileH-dx/2, dx)
+	}
+
+	// A floating sign so the stall is unmistakable from across the plaza.
+	const label = "Shop"
+	lw := canvas.TextWidth(label)
+	c.DrawTextShadow(px-lw/2, awY-canvas.LineH-2, label, 0xFFFFFF, 0x000000)
+}
+
+// drawValance hangs one column of the awning fringe from yTop downward, its
+// tone alternating with horizontal position to read as awning stripes.
+func drawValance(c *canvas.Canvas, x, yTop, dx int) {
+	col := toneWhite
+	if ((dx+iso.HW)/shopStripeW)&1 == 0 {
+		col = toneDim
+	}
+	for y := yTop; y < yTop+shopValanceH; y++ {
+		c.Set(x, y, col)
+	}
+}
+
+// ShopLight returns the canvas pixel where a shop stall sheds its glow (under
+// the awning), given the screen-space origin. The lighting pass uses it so the
+// stall reads as a warm, inviting spot even when the plaza is dimmed.
+func ShopLight(gx, gy int, originSx, originSy float64) (int, int) {
+	px, py := project(gx, gy, originSx, originSy)
+	return px, py + iso.HH - shopCounterH - shopAwningRise/2
 }
 
 func clampi(v, lo, hi int) int {

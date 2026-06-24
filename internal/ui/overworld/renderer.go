@@ -65,6 +65,8 @@ type frameSnapshot struct {
 	chatOpen   bool
 	unreadName string
 	unreadN    int
+	coins      int
+	shopPrompt bool
 }
 
 // entity is a render-side interpolated avatar.
@@ -379,6 +381,16 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 		}
 		lights = append(lights, light.Light{X: gx, Y: gy, Radius: 140, Power: 0.45})
 	}
+
+	// The shop stall glows softly under its awning so it reads as a welcoming
+	// spot even when the plaza is dimmed.
+	for _, s := range r.world.Shops {
+		sx, sy := plaza.ShopLight(s.X, s.Y, originSx, originSy)
+		if sx < -150 || sx > pw+150 || sy < -150 || sy > ph+150 {
+			continue
+		}
+		lights = append(lights, light.Light{X: sx, Y: sy, Radius: 120, Power: 0.5})
+	}
 	r.lightBuf = lights // retain backing array for reuse next frame
 
 	r.lights.Apply(r.screen, lights, ambientLight)
@@ -393,6 +405,16 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 func (r *Renderer) drawHUD(snap frameSnapshot, pw, ph int) {
 	hint := "Enter chat · i inventory · c wardrobe · f friends · q quit"
 	r.screen.DrawText(pw-canvas.TextWidth(hint)-6, ph-canvas.LineH-4, hint, 0x6E6E6E)
+
+	// Coin purse, top-left, so the player always knows their balance.
+	purse := "✦ " + strconv.Itoa(snap.coins)
+	r.screen.DrawTextShadow(6, 4, purse, 0xF2F2F2, 0x000000)
+
+	// Contextual nudge when standing by the shop stall.
+	if snap.shopPrompt {
+		prompt := "press e to shop"
+		r.screen.DrawTextShadow(pw/2-canvas.TextWidth(prompt)/2, ph-2*canvas.LineH-10, prompt, 0xFFFFFF, 0x000000)
+	}
 
 	if snap.unreadName != "" {
 		ind := "✉ " + snap.unreadName

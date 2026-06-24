@@ -97,6 +97,7 @@ everyone is shown a short "connect with a Sixel terminal" notice instead.
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
 | `i`            | Inventory                               |
 | `c`            | Wardrobe (equip cosmetic headwear)      |
+| `e`            | Shop (when standing by the plaza stall) |
 | `f`            | Friends list (Enter to message someone) |
 | `Esc`          | Close any panel                         |
 | `q` / `Ctrl+C` | Disconnect                              |
@@ -183,14 +184,25 @@ Enter on a name pre-fills a `/w` to them.
   portal's own colour, so a world and its gateway look like one place. Chess
   is still the text "coming soon" placeholder.
 - **Cosmetics.** Headwear worn over the avatar (`internal/cosmetic`), drawn in
-  the same monochrome, overhead-lit style — caps, a top hat, an antenna, plus
-  pieces unlocked by clearing the worlds (crown, horns, halo). The wardrobe
-  panel (`c`) lists what you own (starters ∪ inventory grants keyed
-  `cosmetic.*`); the equipped piece is persisted on the player row and
-  broadcast through the hub so everyone sees it.
+  the same monochrome, overhead-lit style. Pieces come from three places:
+  starters everyone has (cap, headband, top hat, antenna), rewards for clearing
+  the worlds (crown, horns, halo), and shop stock bought with coins (beanie,
+  bow, visor, flower crown, wizard hat). The wardrobe panel (`c`) lists what you
+  own — starters ∪ inventory grants keyed `cosmetic.*`; the equipped piece is
+  persisted on the player row and broadcast through the hub so everyone sees it.
+- **Coins & the shop.** A soft currency earned passively: one coin every
+  ~20 seconds you're in the plaza (time inside a portal world doesn't pay, so
+  the reward is for hanging around the shared space), persisted as it lands and
+  shown in the HUD purse. The plaza has a **cosmetics stall** (`H` in the map,
+  rendered as a counter under a striped market awning); walk up to it and press
+  `e` to open the shop (`internal/ui/shop`), which lists the buyable headwear
+  with prices and your balance. A purchase atomically debits the price (a guard
+  in the `UPDATE` makes check-and-charge a single statement, so no double-spend)
+  and grants the cosmetic as a `cosmetic.*` inventory item — the same ownership
+  channel the world rewards use, so it shows up in the wardrobe immediately.
 - **Persistence.** Pure-Go SQLite, single writer connection, in-code
-  migrations on startup. Tables: `players` (with equipped cosmetic), `friends`,
-  `dms`, `inventory`, `saves`.
+  migrations on startup. Tables: `players` (with equipped cosmetic and coin
+  balance), `friends`, `dms`, `inventory`, `saves`.
 
 ## Roadmap
 
@@ -212,9 +224,9 @@ internal/auth/       fingerprints, username rules
 internal/storage/    sqlite, migrations, repositories
 internal/world/      World interface, registry, scoped stores + render handle
 internal/worlds/     world implementations (bomber, doom, comingsoon)
-internal/plaza/      map, isometric tiles, portals
+internal/plaza/      map, isometric tiles, portals, cosmetics shop stall
 internal/cosmetic/   wearable headwear catalog + rendering
-internal/ui/         login, overworld, chat, inventory, cosmetics, friends, toast
+internal/ui/         login, overworld, chat, inventory, cosmetics, shop, friends, toast
 internal/render/     canvas, sixel, iso, light, sprites, screen, syncwriter
 internal/style/      palette, themes
 internal/anim/       camera spring, flicker helpers

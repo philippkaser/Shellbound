@@ -112,8 +112,10 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		if p.X < gx0 || p.X > gx1 || p.Y < gy0 || p.Y > gy1 {
 			continue
 		}
-		px, py := project(p.X, p.Y, originSx, originSy)
-		drawFountain(c, px, py+iso.HH, t)
+		// Center on the statue pair (cells p.Y and p.Y+1), i.e. p.Y+0.5, which is
+		// the pool's centroid — so the sculpture sits in the middle of the water.
+		sx, sy := iso.Project(float64(p.X), float64(p.Y)+0.5)
+		drawFountain(c, int(sx-originSx), int(sy-originSy)+iso.HH, t)
 	}
 }
 

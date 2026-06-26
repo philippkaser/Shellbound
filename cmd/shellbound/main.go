@@ -22,6 +22,7 @@ import (
 	"github.com/shellbound/shellbound/internal/worlds/bomber"
 	"github.com/shellbound/shellbound/internal/worlds/comingsoon"
 	"github.com/shellbound/shellbound/internal/worlds/doom"
+	shellmonworld "github.com/shellbound/shellbound/internal/worlds/shellmon"
 )
 
 // envOr returns the environment variable or a default.
@@ -62,6 +63,8 @@ func main() {
 			w = bomber.New(p.Key, p.Name)
 		case "doom":
 			w = doom.New(p.Key, p.Name)
+		case "shellmon":
+			w = shellmonworld.New(p.Key, p.Name)
 		}
 		if err := registry.Register(w); err != nil {
 			log.Fatal("register world", "key", p.Key, "err", err)

@@ -194,8 +194,21 @@ Enter on a name pre-fills a `/w` to them.
   (`internal/worlds/doom`): perspective walls with brick shading, billboarded
   imps whose eyes glow in the portal's hue, hitscan firing, unlocking the
   *Hellbreaker Horns* for clearing the hall. Both paint their accents in the
-  portal's own colour, so a world and its gateway look like one place. Chess
-  is still the text "coming soon" placeholder.
+  portal's own colour, so a world and its gateway look like one place. The
+  **Shellmon** portal leads to a **creature collector** (`internal/worlds/
+  shellmon`): pick one of three starters, roam a walkable wild route, and battle
+  with a turn-based **6v6 engine** (`internal/shellmon`) over an original
+  12-creature roster across a Spark▸Bramble▸Tide type triangle — catching,
+  leveling and a full Sixel battle screen. The party persists as a JSON roster
+  in the per-world save slot, so no schema is involved.
+- **The Shellmon engine.** `internal/shellmon` is pure, unit-tested game logic
+  and data: the type triangle, an 11-move pool (typed damage plus status), 12
+  species with role-varied stats and level-up learnsets, level-scaled stats with
+  XP/leveling and HP-based catch odds, and a 6v6 battle engine (switches before
+  attacks, speed order, KOs cancel queued moves, stat stages, forced switches,
+  a move-choosing AI). Creatures are procedural monochrome sprites built from
+  outlined volumes, fins, horns, leaves, claws and the rest. The same engine
+  will drive PvP.
 - **Cosmetics.** Headwear worn over the avatar (`internal/cosmetic`), drawn in
   the same monochrome, overhead-lit style. Pieces come from three places:
   starters everyone has (cap, headband, top hat, antenna), rewards for clearing
@@ -223,12 +236,14 @@ Enter on a name pre-fills a `/w` to them.
 
 ## Roadmap
 
-- **Done** — two portal worlds: Bomberman → "The Vault" (bomb arena) and
-  Doom → a raycast FPS, both granting a victory item through the real
-  inventory pipeline.
-- **1.x** — Chess; richer enemy behaviour; inventory the plaza shows off.
-- **Later** — Chess (with correspondence via DMs?), the Doom portal doing
-  whatever a terminal can get away with, player-placed decorations,
+- **Done** — three portal worlds: Bomberman → "The Vault" (bomb arena),
+  Doom → a raycast FPS, and Shellmon → a creature collector with a 6v6
+  battle engine, all granting progression through the real save/inventory
+  pipelines.
+- **Next** — Shellmon **PvP**: challenge a nearby player in the plaza and
+  fight 6v6 over the hub with the same engine.
+- **Later** — trainer battles and a route boss for Shellmon; the Doom portal
+  doing whatever a terminal can get away with; player-placed decorations;
   moderation tools.
 
 ## Repository layout
@@ -240,7 +255,8 @@ internal/hub/        presence + broadcast
 internal/auth/       fingerprints, username rules
 internal/storage/    sqlite, migrations, repositories
 internal/world/      World interface, registry, scoped stores + render handle
-internal/worlds/     world implementations (bomber, doom, comingsoon)
+internal/shellmon/   creature-battler engine: types, moves, species, battles
+internal/worlds/     world implementations (bomber, doom, shellmon, comingsoon)
 internal/plaza/      map, isometric tiles, portals, cosmetics shop stall
 internal/cosmetic/   wearable headwear catalog + rendering
 internal/ui/         login, overworld, chat, inventory, cosmetics, shop, friends, toast

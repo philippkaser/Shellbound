@@ -78,6 +78,14 @@ func (b *Battle) Active(a bool) *Creature {
 	return team[*idx].c
 }
 
+// ActiveIndex returns the team slot of a side's on-field creature. It's useful
+// for a "skip" turn (switching to the already-active slot is a no-op that still
+// lets the opponent act, e.g. while attempting a catch).
+func (b *Battle) ActiveIndex(a bool) int {
+	_, idx := b.side(a)
+	return *idx
+}
+
 // Team returns the creatures of a side, in slot order.
 func (b *Battle) Team(a bool) []*Creature {
 	team, _ := b.side(a)

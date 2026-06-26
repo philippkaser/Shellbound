@@ -58,7 +58,7 @@ type Portal struct {
 // Portals is the 1.0 set, standing evenly across the north end of the plaza.
 var Portals = []Portal{
 	{Key: "bomberman", Name: "Bomberman", X: 15, Y: 3},
-	{Key: "chess", Name: "Chess", X: 33, Y: 3},
+	{Key: "shellmon", Name: "Shellmon", X: 33, Y: 3},
 	{Key: "doom", Name: "Doom", X: 51, Y: 3},
 }
 

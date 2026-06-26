@@ -203,6 +203,21 @@ func (h *Hub) chat(sessionID, text string, emote bool) {
 	}
 }
 
+// emote broadcasts a gesture from a session to everyone (including the sender),
+// so a single render path drives both self and peers.
+func (h *Hub) emote(sessionID, kind string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	s, ok := h.sessions[sessionID]
+	if !ok {
+		return
+	}
+	ev := EvEmote{PlayerID: s.info.ID, Kind: kind}
+	for _, other := range h.sessions {
+		other.send(ev)
+	}
+}
+
 // whisper delivers a DM to one online player. It reports whether the
 // recipient was online to receive it.
 func (h *Hub) whisper(fromSID string, toPlayerID int64, text string) bool {
@@ -275,6 +290,9 @@ func (hd *Handle) Chat(text string) { hd.hub.chat(hd.sid, text, false) }
 
 // Emote broadcasts a /me action line.
 func (hd *Handle) Emote(text string) { hd.hub.chat(hd.sid, text, true) }
+
+// PlayEmote broadcasts a visual gesture (an emote key) to everyone nearby.
+func (hd *Handle) PlayEmote(kind string) { hd.hub.emote(hd.sid, kind) }
 
 // Whisper delivers a DM live if the recipient is online; persistence is
 // the caller's job. Returns whether it was delivered.

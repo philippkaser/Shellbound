@@ -69,9 +69,18 @@ type EvWhisper struct {
 // elsewhere). The session's event channel closes right after.
 type EvKick struct{ Reason string }
 
+// EvEmote announces that a player played a gesture (its Kind is an emote key).
+// Receivers render it on that player's avatar; the sender hears it too, so a
+// single path drives self and peers alike.
+type EvEmote struct {
+	PlayerID int64
+	Kind     string
+}
+
 func (EvJoin) isEvent()    {}
 func (EvLeave) isEvent()   {}
 func (EvMoves) isEvent()   {}
 func (EvChat) isEvent()    {}
 func (EvWhisper) isEvent() {}
 func (EvKick) isEvent()    {}
+func (EvEmote) isEvent()   {}

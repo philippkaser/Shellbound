@@ -9,12 +9,14 @@
 package overworld
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/shellbound/shellbound/internal/cosmetic"
+	"github.com/shellbound/shellbound/internal/emote"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
@@ -94,6 +96,12 @@ type moveTickMsg time.Time
 type hubEventMsg struct{ ev hub.Event }
 type hubClosedMsg struct{}
 
+// emoteState is one player's active gesture and when it began.
+type emoteState struct {
+	kind  string
+	start time.Time
+}
+
 // moveIntent is the direction the player currently wants to walk. seen is the
 // last time a key for this direction arrived; count grows with key-repeats so
 // the tick can tell a sustained hold (repeats flowing) from a single tap.
@@ -136,13 +144,18 @@ type Model struct {
 
 	remotes map[int64]hub.PlayerState
 
-	chat     chat.Model
-	inv      inventory.Model
-	friends  friends.Model
-	wardrobe cosmetics.Model
-	shop     shop.Model
-	toasts   toast.Model
-	unread   map[int64]string // player id -> username with unseen DMs
+	chat      chat.Model
+	inv       inventory.Model
+	friends   friends.Model
+	wardrobe  cosmetics.Model
+	shop      shop.Model
+	toasts    toast.Model
+	unread    map[int64]string // player id -> username with unseen DMs
+	emoteMenu bool             // the quick emote picker is open
+
+	// emotes holds each player's in-flight gesture (including our own); entries
+	// are pruned once older than emote.Dur.
+	emotes map[int64]emoteState
 
 	lastCoinAt time.Time // when the last passive coin was credited
 
@@ -203,6 +216,7 @@ func New(
 		shop:     shop.New(theme),
 		toasts:   toast.New(theme),
 		unread:   make(map[int64]string),
+		emotes:   make(map[int64]emoteState),
 
 		lastCoinAt: time.Now(),
 	}
@@ -230,13 +244,13 @@ func (m *Model) publish() {
 		players = append(players, playerSnapshot{
 			id: st.Info.ID, name: st.Info.Name, color: st.Info.Color,
 			x: st.Pos.X, y: st.Pos.Y, dir: st.Dir, moving: st.Moving,
-			cosmetic: st.Info.Cosmetic,
+			cosmetic: st.Info.Cosmetic, emote: m.activeEmote(st.Info.ID),
 		})
 	}
 	players = append(players, playerSnapshot{
 		id: m.player.ID, name: m.player.Username, color: m.player.Color,
 		x: m.px, y: m.py, dir: m.dir, moving: m.moving,
-		cosmetic: m.player.Cosmetic,
+		cosmetic: m.player.Cosmetic, emote: m.activeEmote(m.player.ID),
 	})
 
 	var panel []string
@@ -249,6 +263,8 @@ func (m *Model) publish() {
 		panel = m.wardrobe.Lines()
 	case m.shop.IsOpen():
 		panel = m.shop.Lines()
+	case m.emoteMenu:
+		panel = emoteMenuLines()
 	}
 
 	// The "press e to shop" nudge shows only when standing next to the stall
@@ -344,6 +360,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.handle.Move(hub.Pos{X: m.px, Y: m.py}, m.dir, false)
 		}
 		m.accrueCoins()
+		m.pruneEmotes()
 		m.publish()
 		return m, animTick()
 
@@ -413,10 +430,17 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m.updateShop(key)
 	}
 
+	if m.emoteMenu {
+		return m.updateEmoteMenu(key)
+	}
+
 	// Plaza focus.
 	switch key.String() {
 	case "q":
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "bye"} }
+	case "g":
+		m.emoteMenu = true
+		return m, nil
 	case "e":
 		if m.world.NearShop(m.px, m.py/2) {
 			m.shop.Open(m.ownedCosmetics(), m.player.Coins)
@@ -484,7 +508,7 @@ func (m Model) tickMove() (Model, tea.Cmd) {
 		return m, nil
 	}
 	// A panel or the chat console stole focus — stop walking.
-	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() {
+	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() || m.emoteMenu {
 		return m.stopWalk(), nil
 	}
 	window := tapWindow
@@ -600,6 +624,64 @@ func (m *Model) accrueCoins() {
 	} else {
 		m.player.Coins += awarded // keep the HUD honest even if the write hiccups
 	}
+}
+
+// activeEmote returns a player's in-flight gesture key, or "" if none is
+// playing or it has expired.
+func (m Model) activeEmote(id int64) string {
+	e, ok := m.emotes[id]
+	if !ok || time.Since(e.start).Seconds() > emote.Dur {
+		return ""
+	}
+	return e.kind
+}
+
+// pruneEmotes drops gestures that have finished, so the map can't grow without
+// bound as players come and go.
+func (m *Model) pruneEmotes() {
+	for id, e := range m.emotes {
+		if time.Since(e.start).Seconds() > emote.Dur {
+			delete(m.emotes, id)
+		}
+	}
+}
+
+// playEmote starts a gesture locally and broadcasts it. The hub echoes it back,
+// but recording it now makes our own emote show instantly.
+func (m *Model) playEmote(kind string) {
+	if !emote.Valid(kind) {
+		return
+	}
+	m.emotes[m.player.ID] = emoteState{kind: kind, start: time.Now()}
+	m.handle.PlayEmote(kind)
+}
+
+// updateEmoteMenu handles the quick emote picker: a number plays that gesture
+// and closes the menu; Esc/g closes it.
+func (m Model) updateEmoteMenu(key tea.KeyMsg) (Model, tea.Cmd) {
+	s := key.String()
+	switch s {
+	case "esc", "g", "q":
+		m.emoteMenu = false
+		return m, nil
+	}
+	all := emote.All()
+	if len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
+		if i := int(s[0] - '1'); i < len(all) {
+			m.playEmote(all[i].Key)
+			m.emoteMenu = false
+		}
+	}
+	return m, nil
+}
+
+// emoteMenuLines is the quick-picker panel content for the renderer.
+func emoteMenuLines() []string {
+	out := []string{"Emotes", ""}
+	for i, e := range emote.All() {
+		out = append(out, "  "+strconv.Itoa(i+1)+"  "+e.Verb)
+	}
+	return append(out, "", "1-8 play  Esc close")
 }
 
 // ownedCosmetics returns the set of unlockable cosmetic keys the player owns,
@@ -753,6 +835,11 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 		// if they're busy in a panel or the message scrolls off.
 		m.chat.Add(chat.Entry{Kind: chat.KindWhisperIn, Name: ev.From.Name, Color: ev.From.Color, Text: ev.Text})
 		m.unread[ev.From.ID] = ev.From.Name
+
+	case hub.EvEmote:
+		if emote.Valid(ev.Kind) {
+			m.emotes[ev.PlayerID] = emoteState{kind: ev.Kind, start: time.Now()}
+		}
 
 	case hub.EvKick:
 		return m, func() tea.Msg { return DisconnectMsg{Reason: ev.Reason} }

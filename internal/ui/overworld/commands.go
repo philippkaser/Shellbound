@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/shellbound/shellbound/internal/emote"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/ui/chat"
 )
@@ -34,6 +35,7 @@ func (m Model) runCommand(c chat.Command) (Model, tea.Cmd) {
 			"/w <user> — show recent messages with them",
 			"/friend add|remove|list <user>",
 			"/me <action> — emote",
+			"/wave /happy /laugh /heart /cry /angry /sleep /dance — gestures (or press g)",
 			"/quit — disconnect",
 		} {
 			m.chat.AddSystem(line)
@@ -65,6 +67,10 @@ func (m Model) runCommand(c chat.Command) (Model, tea.Cmd) {
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "bye"} }
 
 	default:
+		if emote.Valid(c.Name) {
+			m.playEmote(c.Name)
+			return m, nil
+		}
 		m.chat.AddSystem("unknown command /" + c.Name + " — try /help")
 	}
 	return m, nil

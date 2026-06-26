@@ -95,6 +95,7 @@ everyone is shown a short "connect with a Sixel terminal" notice instead.
 | `y` `u` `b` `n`| Walk diagonally (NW / NE / SW / SE)     |
 | `Shift` + move | Run (two tiles per step)                |
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
+| `g`            | Emote picker (or `/wave`, `/dance`, …)  |
 | `i`            | Inventory                               |
 | `c`            | Wardrobe (equip cosmetic headwear)      |
 | `e`            | Shop (when standing by the plaza stall) |
@@ -103,7 +104,8 @@ everyone is shown a short "connect with a Sixel terminal" notice instead.
 | `q` / `Ctrl+C` | Disconnect                              |
 
 Chat commands: `/help`, `/who`, `/w <user> <msg>`, `/friend add|remove|list`,
-`/me <action>`, `/quit`.
+`/me <action>`, `/quit`. Emotes: `/wave`, `/happy`, `/laugh`, `/heart`,
+`/cry`, `/angry`, `/sleep`, `/dance` (or press `g` for the picker).
 
 Direct messages are sent and read in the chat console: `/w <user> <msg>`
 whispers someone (delivered live if they're online, saved otherwise), and
@@ -170,6 +172,12 @@ Enter on a name pre-fills a `/w` to them.
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.
   Connecting the same key twice hands the avatar to the newest session.
+- **Emotes.** Gestures (`internal/emote`) broadcast through the hub like chat
+  (the sender hears its own echo, so one render path drives self and peers).
+  Each plays for a few seconds as a hand-pixelled icon in a callout bubble
+  above the avatar's head — a wave, heart, laugh, tears, anger, a sleepy "Z",
+  a music note — and some add a little body motion (a hop, a sway, a crouch).
+  Trigger them with `/wave`-style commands or the `g` quick-picker.
 - **Worlds.** Portals reference `world.World` implementations from a
   registry. A world receives a `Context` carrying save/inventory APIs
   pre-bound to `(player, world key)` — it cannot touch any other slot — plus

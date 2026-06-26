@@ -11,6 +11,7 @@ import (
 
 	"github.com/shellbound/shellbound/internal/anim"
 	"github.com/shellbound/shellbound/internal/cosmetic"
+	"github.com/shellbound/shellbound/internal/emote"
 	"github.com/shellbound/shellbound/internal/hub"
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
@@ -47,6 +48,7 @@ type playerSnapshot struct {
 	dir      hub.Dir
 	moving   bool
 	cosmetic string // equipped headwear key
+	emote    string // in-flight gesture key ("" = none)
 }
 
 // frameSnapshot is everything the render loop reads. Built cheaply on the
@@ -78,6 +80,7 @@ type entity struct {
 	name     string
 	color    string
 	cosmetic string
+	emote    string
 	seen     bool
 }
 
@@ -275,6 +278,7 @@ func (r *Renderer) updateEntities(snap frameSnapshot) {
 		e.dir, e.moving = p.dir, p.moving
 		e.name, e.color = p.name, p.color
 		e.cosmetic = p.cosmetic
+		e.emote = p.emote
 		e.seen = true
 	}
 	for id, e := range r.ents {
@@ -315,7 +319,14 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 		sx, sy := iso.Project(e.fx, e.fy)
 		footX := int(sx - originSx)
 		footY := int(sy-originSy) + iso.HH
-		// A soft oval contact shadow grounds the avatar.
+		// An emote adds a body gesture: sway shifts the feet (and shadow), while
+		// hop/crouch lift or settle the figure off its (stationary) shadow.
+		edx, edy := 0, 0
+		if e.emote != "" {
+			edx, edy = emote.Offset(e.emote, t)
+		}
+		footX += edx
+		// A soft oval contact shadow grounds the avatar (stays on the ground).
 		drawShadow(r.screen, footX, footY)
 		frame, bob := 0, 0
 		if e.moving {
@@ -324,10 +335,15 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 			// Gentle idle breathing so a standing avatar isn't perfectly static.
 			bob = int(math.Round(math.Sin(t*2.2+float64(i)*1.3) * 0.8))
 		}
-		sprites.Draw(r.screen, footX, footY+bob, sprites.Facing(e.dir), frame, e.moving)
-		cosmetic.Draw(r.screen, footX, footY+bob, sprites.Facing(e.dir), e.cosmetic, t)
+		drawY := footY + bob + edy
+		sprites.Draw(r.screen, footX, drawY, sprites.Facing(e.dir), frame, e.moving)
+		cosmetic.Draw(r.screen, footX, drawY, sprites.Facing(e.dir), e.cosmetic, t)
 		nameW := canvas.TextWidth(e.name)
-		r.screen.DrawTextShadow(footX-nameW/2, footY+bob-sprites.Height-canvas.LineH, e.name, canvas.Hex(e.color), 0x000000)
+		r.screen.DrawTextShadow(footX-nameW/2, drawY-sprites.Height-canvas.LineH, e.name, canvas.Hex(e.color), 0x000000)
+		if e.emote != "" {
+			_, hcy := sprites.HeadCenter(footX, drawY)
+			emote.DrawBubble(r.screen, footX, hcy-sprites.HeadRadius(), e.emote, t)
+		}
 	}
 }
 
@@ -403,7 +419,7 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 }
 
 func (r *Renderer) drawHUD(snap frameSnapshot, pw, ph int) {
-	hint := "Enter chat · i inventory · c wardrobe · f friends · q quit"
+	hint := "Enter chat · g emote · i inventory · c wardrobe · f friends · q quit"
 	r.screen.DrawText(pw-canvas.TextWidth(hint)-6, ph-canvas.LineH-4, hint, 0x6E6E6E)
 
 	// Coin purse, top-left, so the player always knows their balance.

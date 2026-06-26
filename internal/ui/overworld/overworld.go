@@ -102,6 +102,18 @@ type emoteState struct {
 	start time.Time
 }
 
+// inspectInfo is the snapshot of another player shown in the inspect panel.
+type inspectInfo struct {
+	id           int64
+	name         string
+	cosmeticName string
+	since        string
+}
+
+// interactRadius is how close (in cells, Chebyshev) another player must be to
+// greet or inspect them.
+const interactRadius = 2
+
 // moveIntent is the direction the player currently wants to walk. seen is the
 // last time a key for this direction arrived; count grows with key-repeats so
 // the tick can tell a sustained hold (repeats flowing) from a single tap.
@@ -152,6 +164,9 @@ type Model struct {
 	toasts    toast.Model
 	unread    map[int64]string // player id -> username with unseen DMs
 	emoteMenu bool             // the quick emote picker is open
+
+	// inspecting holds the player whose card is open (nil = none).
+	inspecting *inspectInfo
 
 	// emotes holds each player's in-flight gesture (including our own); entries
 	// are pruned once older than emote.Dur.
@@ -265,12 +280,19 @@ func (m *Model) publish() {
 		panel = m.shop.Lines()
 	case m.emoteMenu:
 		panel = emoteMenuLines()
+	case m.inspecting != nil:
+		panel = m.inspectLines()
 	}
 
-	// The "press e to shop" nudge shows only when standing next to the stall
-	// with nothing else holding focus.
-	shopPrompt := m.world.NearShop(m.px, m.py/2) &&
-		!m.chat.IsOpen() && len(panel) == 0
+	// Contextual bottom-of-screen nudges, only when nothing holds focus.
+	idle := !m.chat.IsOpen() && len(panel) == 0
+	shopPrompt := idle && m.world.NearShop(m.px, m.py/2)
+	interactPrompt := ""
+	if idle {
+		if st, ok := m.nearestPlayer(); ok {
+			interactPrompt = "x  greet " + st.Info.Name
+		}
+	}
 
 	var unreadName string
 	var unreadN int
@@ -291,15 +313,16 @@ func (m *Model) publish() {
 		termW: m.termW, termH: m.termH,
 		cellW: m.cellW, cellH: m.cellH,
 		players: players, selfID: m.player.ID,
-		chat:       append([]chat.Entry(nil), m.chat.History()...),
-		toast:      m.toasts.Message(),
-		panelLines: panel,
-		chatInput:  chatInput,
-		chatOpen:   m.chat.IsOpen(),
-		unreadName: unreadName,
-		unreadN:    unreadN,
-		coins:      m.player.Coins,
-		shopPrompt: shopPrompt,
+		chat:           append([]chat.Entry(nil), m.chat.History()...),
+		toast:          m.toasts.Message(),
+		panelLines:     panel,
+		chatInput:      chatInput,
+		chatOpen:       m.chat.IsOpen(),
+		unreadName:     unreadName,
+		unreadN:        unreadN,
+		coins:          m.player.Coins,
+		shopPrompt:     shopPrompt,
+		interactPrompt: interactPrompt,
 	})
 }
 
@@ -434,12 +457,21 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m.updateEmoteMenu(key)
 	}
 
+	if m.inspecting != nil {
+		return m.updateInspect(key)
+	}
+
 	// Plaza focus.
 	switch key.String() {
 	case "q":
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "bye"} }
 	case "g":
 		m.emoteMenu = true
+		return m, nil
+	case "x":
+		if st, ok := m.nearestPlayer(); ok {
+			m.openInspect(st)
+		}
 		return m, nil
 	case "e":
 		if m.world.NearShop(m.px, m.py/2) {
@@ -508,7 +540,7 @@ func (m Model) tickMove() (Model, tea.Cmd) {
 		return m, nil
 	}
 	// A panel or the chat console stole focus — stop walking.
-	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() || m.emoteMenu {
+	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() || m.emoteMenu || m.inspecting != nil {
 		return m.stopWalk(), nil
 	}
 	window := tapWindow
@@ -682,6 +714,79 @@ func emoteMenuLines() []string {
 		out = append(out, "  "+strconv.Itoa(i+1)+"  "+e.Verb)
 	}
 	return append(out, "", "1-8 play  Esc close")
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// nearestPlayer returns the closest remote player within interactRadius cells of
+// the local avatar (Chebyshev distance), for greeting/inspecting.
+func (m Model) nearestPlayer() (hub.PlayerState, bool) {
+	sx, sy := m.px, m.py/2
+	best := interactRadius + 1
+	var found hub.PlayerState
+	ok := false
+	for _, st := range m.remotes {
+		dx, dy := abs(sx-st.Pos.X), abs(sy-st.Pos.Y/2)
+		d := dx
+		if dy > d {
+			d = dy
+		}
+		if d <= interactRadius && d < best {
+			best, found, ok = d, st, true
+		}
+	}
+	return found, ok
+}
+
+// openInspect builds the inspect card for a remote player, pulling their join
+// date from storage (only their public identity is broadcast live).
+func (m *Model) openInspect(st hub.PlayerState) {
+	card := &inspectInfo{
+		id:           st.Info.ID,
+		name:         st.Info.Name,
+		cosmeticName: cosmetic.Name(st.Info.Cosmetic),
+	}
+	if p, err := m.repos.Players.ByID(st.Info.ID); err == nil && p != nil {
+		card.since = p.CreatedAt.Format("Jan 2006")
+	}
+	m.inspecting = card
+}
+
+// updateInspect handles keys while a player's card is open: w pre-fills a
+// whisper, f friends them, Esc/x closes.
+func (m Model) updateInspect(key tea.KeyMsg) (Model, tea.Cmd) {
+	card := m.inspecting
+	switch key.String() {
+	case "esc", "x", "q":
+		m.inspecting = nil
+	case "w":
+		m.inspecting = nil
+		return m, m.chat.OpenWith("/w " + card.name + " ")
+	case "f":
+		if err := m.repos.Friends.Add(m.player.ID, card.id); err == nil {
+			m.toasts.Show("✓ friend added: " + card.name)
+		} else {
+			m.toasts.Show("could not add friend")
+		}
+		m.inspecting = nil
+	}
+	return m, nil
+}
+
+// inspectLines is the card content for the renderer.
+func (m Model) inspectLines() []string {
+	c := m.inspecting
+	out := []string{c.name, ""}
+	out = append(out, "wearing: "+c.cosmeticName)
+	if c.since != "" {
+		out = append(out, "wandering since "+c.since)
+	}
+	return append(out, "", "w whisper · f friend · Esc close")
 }
 
 // ownedCosmetics returns the set of unlockable cosmetic keys the player owns,

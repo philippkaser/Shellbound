@@ -96,6 +96,7 @@ everyone is shown a short "connect with a Sixel terminal" notice instead.
 | `Shift` + move | Run (two tiles per step)                |
 | `Enter`        | Open chat — `Enter` sends, `Esc` cancels|
 | `g`            | Emote picker (or `/wave`, `/dance`, …)  |
+| `x`            | Greet/inspect a nearby player           |
 | `i`            | Inventory                               |
 | `c`            | Wardrobe (equip cosmetic headwear)      |
 | `e`            | Shop (when standing by the plaza stall) |
@@ -178,6 +179,10 @@ Enter on a name pre-fills a `/w` to them.
   above the avatar's head — a wave, heart, laugh, tears, anger, a sleepy "Z",
   a music note — and some add a little body motion (a hop, a sway, a crouch).
   Trigger them with `/wave`-style commands or the `g` quick-picker.
+- **Player interactions.** Walk up to someone and press `x` to open their card —
+  name, what they're wearing, how long they've wandered Shellbound — with quick
+  actions to whisper (`w`) or friend (`f`) them. The same walk-up-and-target hook
+  is what a future PvP challenge will hang off.
 - **Worlds.** Portals reference `world.World` implementations from a
   registry. A world receives a `Context` carrying save/inventory APIs
   pre-bound to `(player, world key)` — it cannot touch any other slot — plus

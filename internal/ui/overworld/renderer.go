@@ -60,15 +60,16 @@ type frameSnapshot struct {
 	players      []playerSnapshot
 	selfID       int64
 
-	chat       []chat.Entry
-	toast      string
-	panelLines []string
-	chatInput  string
-	chatOpen   bool
-	unreadName string
-	unreadN    int
-	coins      int
-	shopPrompt bool
+	chat           []chat.Entry
+	toast          string
+	panelLines     []string
+	chatInput      string
+	chatOpen       bool
+	unreadName     string
+	unreadN        int
+	coins          int
+	shopPrompt     bool
+	interactPrompt string
 }
 
 // entity is a render-side interpolated avatar.
@@ -426,10 +427,13 @@ func (r *Renderer) drawHUD(snap frameSnapshot, pw, ph int) {
 	purse := "✦ " + strconv.Itoa(snap.coins)
 	r.screen.DrawTextShadow(6, 4, purse, 0xF2F2F2, 0x000000)
 
-	// Contextual nudge when standing by the shop stall.
+	// Contextual nudges, stacked above the hint line.
 	if snap.shopPrompt {
 		prompt := "press e to shop"
 		r.screen.DrawTextShadow(pw/2-canvas.TextWidth(prompt)/2, ph-2*canvas.LineH-10, prompt, 0xFFFFFF, 0x000000)
+	}
+	if snap.interactPrompt != "" {
+		r.screen.DrawTextShadow(pw/2-canvas.TextWidth(snap.interactPrompt)/2, ph-3*canvas.LineH-12, snap.interactPrompt, 0xFFFFFF, 0x000000)
 	}
 
 	if snap.unreadName != "" {

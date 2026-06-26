@@ -433,6 +433,104 @@ func spriteGulper(s *spriteCtx) {
 	s.glint(4, -3)
 }
 
+// === second wave ===
+
+func spriteVoltun(s *spriteCtx) {
+	// A charged orb with two crackling bolt antennae.
+	s.stroke(-2, -6, -4, -10, max1(s.u/2), sUp) // left bolt
+	s.stroke(-4, -10, -2, -12, max1(s.u/2), sUp)
+	s.stroke(2, -6, 4, -10, max1(s.u/2), sUp) // right bolt
+	s.stroke(4, -10, 2, -12, max1(s.u/2), sUp)
+	s.dot2(-2, -12, sGlint)
+	s.dot2(2, -12, sGlint)
+	s.mass(0, 2, 7, 7)
+	s.stroke(-3, 0, 0, 3, s.u, sUp) // bolt marking
+	s.stroke(0, 3, 2, 6, s.u, sUp)
+	s.eye(-2, 1, true)
+	s.eye(3, 1, true)
+	s.glint(2, -1)
+}
+
+func spriteMagmaw(s *spriteCtx) {
+	// A low, heavy brute with a glowing magma maw.
+	s.mass(0, 2, 10, 6)
+	s.legs(8, 7, 3, 4)
+	s.arc(0, -2, 7, 3, sLow)
+	s.oval(s.cx, s.cy+5*s.u, 7*s.u, 3*s.u, sDark) // maw
+	s.teeth(0, 3, 5, 6, true)
+	s.teeth(0, 7, 5, 5, false)
+	s.stroke(-6, -1, -4, 1, s.u, sUp) // glowing cracks
+	s.stroke(5, -1, 3, 1, s.u, sUp)
+	s.eye(-4, -2, true)
+	s.eye(4, -2, true)
+	s.glint(2, -3)
+}
+
+func spriteFrostnip(s *spriteCtx) {
+	// A crystalline sprite — a small core ringed by sharp ice shards.
+	s.blade(0, -4, 2, 7, false, sUp) // top shard
+	s.blade(-6, 0, 2, 5, false, sMid)
+	s.blade(6, 0, 2, 5, false, sMid)
+	s.blade(-4, 6, 2, 5, true, sMid) // lower shards
+	s.blade(4, 6, 2, 5, true, sMid)
+	s.mass(0, 2, 5, 5)
+	s.glint(1, 0)
+	s.eye(-2, 2, false)
+	s.eye(2, 2, false)
+}
+
+func spriteAnchora(s *spriteCtx) {
+	// A barnacled shell clutching an anchor.
+	s.mass(0, 2, 9, 6)
+	s.arc(0, 0, 7, 3, sLow)
+	s.arc(0, 3, 6, 2, sLow)
+	s.legs(8, 6, 3, 2)
+	// Anchor: shaft, stock, two flukes.
+	s.stroke(0, -8, 0, 2, max1(s.u/2)*2, sUp)
+	s.stroke(-3, -6, 3, -6, max1(s.u/2)*2, sUp)
+	s.stroke(0, 2, -4, -1, max1(s.u/2)*2, sUp)
+	s.stroke(0, 2, 4, -1, max1(s.u/2)*2, sUp)
+	s.dot2(0, -9, sGlint) // ring
+	s.eye(-3, 3, false)
+	s.eye(3, 3, false)
+}
+
+func spritePricklepup(s *spriteCtx) {
+	// A bristly cactus pup: ear blades, a back of spines, stubby legs.
+	s.blade(-3, -5, 1, 4, false, sUp) // ears
+	s.blade(3, -5, 1, 4, false, sUp)
+	for _, dx := range []int{-5, -2, 1, 4} {
+		s.blade(dx, -2, 1, 3, false, sMid) // back spines
+	}
+	s.mass(0, 4, 6, 6)
+	s.legs(10, 4, 2, 2)
+	s.speckle(0, 4, 4, 4, 2)
+	s.eye(-2, 4, false)
+	s.eye(2, 4, false)
+	s.glint(2, 2)
+}
+
+func spriteBloomback(s *spriteCtx) {
+	// A shelled grazer with a blossom crowning its back.
+	s.mass(0, 4, 9, 5) // shell
+	s.arc(0, 2, 7, 3, sLow)
+	s.legs(8, 6, 3, 4)
+	s.mass(-8, 4, 3, 3) // head
+	s.eye(-8, 3, false)
+	// Flower: a ring of petals around a bright center.
+	for _, a := range []float64{0, 1.05, 2.1, 3.14, 4.19, 5.24} {
+		px := int(math.Round(math.Cos(a) * 3))
+		py := int(math.Round(math.Sin(a)*2)) - 2
+		s.dot2(px, py, sUp)
+	}
+	s.dot2(0, -2, sGlint)
+}
+
+// dot2 sets a small filled disc at a design offset (a petal, spark or rivet).
+func (s *spriteCtx) dot2(ox, oy int, tone canvas.Color) {
+	s.c.FillCircle(s.cx+ox*s.u, s.cy+oy*s.u, max1(s.u/2), tone)
+}
+
 // dot is a small dark feature (mouths, embers).
 func (s *spriteCtx) dot(ox, oy int) {
 	s.c.FillCircle(s.cx+ox*s.u, s.cy+oy*s.u, max1(s.u/2), sDark)

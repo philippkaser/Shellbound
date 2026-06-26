@@ -28,8 +28,8 @@ func TestTypeTriangle(t *testing.T) {
 }
 
 func TestCatalogIntegrity(t *testing.T) {
-	if len(All()) != 12 {
-		t.Fatalf("expected 12 species, got %d", len(All()))
+	if len(All()) != 18 {
+		t.Fatalf("expected 18 species, got %d", len(All()))
 	}
 	if len(Starters()) != 3 {
 		t.Fatalf("expected 3 starters, got %d", len(Starters()))

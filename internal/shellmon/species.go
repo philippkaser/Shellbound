@@ -78,6 +78,27 @@ var catalog = []Species{
 	{Key: "gulper", Name: "Gulper", Type: Tide,
 		BaseHP: 66, BaseAtk: 55, BaseDef: 50, BaseSpd: 40,
 		Learnset: learnset("splash", "mist", "wave"), sprite: spriteGulper},
+
+	// --- second wave ---
+
+	{Key: "voltun", Name: "Voltun", Type: Spark,
+		BaseHP: 48, BaseAtk: 58, BaseDef: 46, BaseSpd: 66,
+		Learnset: learnset("ember", "kindle", "flare"), sprite: spriteVoltun},
+	{Key: "magmaw", Name: "Magmaw", Type: Spark,
+		BaseHP: 64, BaseAtk: 64, BaseDef: 54, BaseSpd: 30,
+		Learnset: learnset("ember", "kindle", "flare"), sprite: spriteMagmaw},
+	{Key: "frostnip", Name: "Frostnip", Type: Tide,
+		BaseHP: 46, BaseAtk: 52, BaseDef: 48, BaseSpd: 60,
+		Learnset: learnset("splash", "mist", "wave"), sprite: spriteFrostnip},
+	{Key: "anchora", Name: "Anchora", Type: Tide,
+		BaseHP: 68, BaseAtk: 56, BaseDef: 66, BaseSpd: 28,
+		Learnset: learnset("splash", "mist", "wave"), sprite: spriteAnchora},
+	{Key: "pricklepup", Name: "Pricklepup", Type: Bramble,
+		BaseHP: 50, BaseAtk: 58, BaseDef: 48, BaseSpd: 56,
+		Learnset: learnset("vine", "root", "thorn"), sprite: spritePricklepup},
+	{Key: "bloomback", Name: "Bloomback", Type: Bramble,
+		BaseHP: 66, BaseAtk: 52, BaseDef: 64, BaseSpd: 30,
+		Learnset: learnset("vine", "root", "thorn"), sprite: spriteBloomback},
 }
 
 var bySpecies = func() map[string]Species {

@@ -39,6 +39,10 @@ type pvpModel struct {
 	move    int
 	swap    int
 	exiting bool
+
+	youFX hpFX
+	foeFX hpFX
+	anim  battleAnim
 }
 
 // NewPvP builds the PvP battle model for one side of a shared match. exit is
@@ -262,19 +266,31 @@ func (m *pvpModel) draw(pw, ph int, t float64) {
 	banner := "vs " + m.opponent
 	m.scr.DrawText(pw/2-canvas.TextWidth(banner)/2, 14, banner, uiDim)
 
+	// Advance HP easing + hit/faint reactions and the per-turn effects.
+	m.foeFX.sync(v.Foe.Name, v.Foe.HP, v.Foe.MaxHP)
+	m.youFX.sync(v.You.Name, v.You.HP, v.You.MaxHP)
+	m.anim.trigger(v.TurnSeq, v.YouLastType, v.YouCast, v.FoeLastType, v.FoeCast)
+
 	// Foe (upper-right).
 	fx, fy := pw*70/100, ph*36/100
 	drawPlatform(m.scr, fx, fy+34, 70)
-	mon.DrawCreature(m.scr, fx, fy+bob, 3, v.Foe.Species)
-	infoCard(m.scr, 30, 40, 250, v.Foe.Name, v.Foe.Level, v.Foe.HP, v.Foe.MaxHP, false)
+	if !m.foeFX.gone() {
+		mon.DrawCreature(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, v.Foe.Species)
+	}
+	infoCard(m.scr, 30, 40, 250, v.Foe.Name, v.Foe.Level, m.foeFX.shownHP(), v.Foe.MaxHP, false)
 	teamPips(m.scr, 30, 74, v.FoeTotal, v.FoeAlive)
 
 	// You (lower-left).
 	yx, yy := pw*30/100, ph*72/100
 	drawPlatform(m.scr, yx, yy+20, 92)
-	mon.DrawCreature(m.scr, yx, yy-10+bob, 4, v.You.Species)
-	infoCard(m.scr, pw-290, ph*52/100, 260, v.You.Name, v.You.Level, v.You.HP, v.You.MaxHP, true)
+	if !m.youFX.gone() {
+		mon.DrawCreature(m.scr, yx+m.youFX.shakeX(), yy-10+bob+m.youFX.sinkY(), 4, v.You.Species)
+	}
+	infoCard(m.scr, pw-290, ph*52/100, 260, v.You.Name, v.You.Level, m.youFX.shownHP(), v.You.MaxHP, true)
 	teamPips(m.scr, pw-290, ph*52/100+44, len(v.Party), v.YouAlive)
+
+	// Move casts and impact bursts for the current turn.
+	m.anim.draw(m.scr, yx, yy-10, fx, fy)
 
 	// Bottom bar: log + contextual UI.
 	barY := ph - 104

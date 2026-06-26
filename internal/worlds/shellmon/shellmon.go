@@ -113,7 +113,11 @@ type model struct {
 	partyCur int // cursor in the party view
 
 	// battle
-	bt *battleUI
+	bt      *battleUI
+	youFX   hpFX
+	foeFX   hpFX
+	anim    battleAnim
+	animSeq int
 }
 
 // Init implements tea.Model.

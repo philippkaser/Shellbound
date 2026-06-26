@@ -208,11 +208,14 @@ Enter on a name pre-fills a `/w` to them.
   **Shellmon** portal leads to a **creature collector** (`internal/worlds/
   shellmon`): pick one of three starters, roam a walkable wild route, and battle
   with a turn-based **6v6 engine** (`internal/shellmon`) over an original
-  12-creature roster across a Spark▸Bramble▸Tide type triangle — catching,
-  leveling and a full Sixel battle screen. The party persists as a JSON roster
-  in the per-world save slot, so no schema is involved.
+  18-creature roster across a Spark▸Bramble▸Tide type triangle — catching,
+  leveling and a full Sixel battle screen with animated effects (eased HP bars,
+  hit shakes, faint sinks, type-styled cast motes and impact bursts). The wild
+  route is drawn in the same 2:1 isometric projection as the plaza (a diamond
+  field ringed by a depth-sorted forest). The party persists as a JSON roster in
+  the per-world save slot, so no schema is involved.
 - **The Shellmon engine.** `internal/shellmon` is pure, unit-tested game logic
-  and data: the type triangle, an 11-move pool (typed damage plus status), 12
+  and data: the type triangle, an 11-move pool (typed damage plus status), 18
   species with role-varied stats and level-up learnsets, level-scaled stats with
   XP/leveling and HP-based catch odds, and a 6v6 battle engine (switches before
   attacks, speed order, KOs cancel queued moves, stat stages, forced switches,

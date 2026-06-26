@@ -45,7 +45,21 @@ func (m *model) beginBattle(foe *mon.Creature, wild bool) {
 	}
 	bt.log = []string{verb}
 	m.bt = bt
+	m.youFX, m.foeFX, m.anim, m.animSeq = hpFX{}, hpFX{}, battleAnim{}, 0
 	m.state = stateBattle
+}
+
+// resolveTurn runs the player's action against the foe's AI, capturing both
+// move types so the renderer can play the cast/impact effects.
+func (m *model) resolveTurn(playerAct mon.Action, youCast bool, youType mon.Type) {
+	bt := m.bt
+	foeAct := bt.b.ChooseAI(false)
+	foeType, foeCast := moveType(bt.b.Active(false), foeAct.Index)
+	bt.log = appendLog(bt.log, bt.b.ResolveTurn(playerAct, foeAct)...)
+	m.animSeq++
+	m.anim.trigger(m.animSeq, youType, youCast, foeType, foeCast)
+	bt.sub = subMenu
+	m.afterTurn()
 }
 
 func (m *model) keyBattle(key string) {
@@ -168,11 +182,8 @@ func (m *model) keyBattleSwitch(key string) {
 
 // playerAttack resolves a turn with the player attacking and the foe's AI.
 func (m *model) playerAttack(move int) {
-	bt := m.bt
-	ev := bt.b.ResolveTurn(mon.Action{Kind: mon.Attack, Index: move}, bt.b.ChooseAI(false))
-	bt.log = appendLog(bt.log, ev...)
-	bt.sub = subMenu
-	m.afterTurn()
+	yt, yc := moveType(m.bt.b.Active(true), move)
+	m.resolveTurn(mon.Action{Kind: mon.Attack, Index: move}, yc, yt)
 }
 
 // commitSwitch swaps the active creature. A forced switch (after a faint) is
@@ -189,10 +200,7 @@ func (m *model) commitSwitch(idx int) {
 		bt.sub = subMenu
 		return
 	}
-	ev := bt.b.ResolveTurn(mon.Action{Kind: mon.Switch, Index: idx}, bt.b.ChooseAI(false))
-	bt.log = appendLog(bt.log, ev...)
-	bt.sub = subMenu
-	m.afterTurn()
+	m.resolveTurn(mon.Action{Kind: mon.Switch, Index: idx}, false, mon.Plain)
 }
 
 // attemptCatch tries to capture a wild foe; a miss costs the turn.
@@ -219,9 +227,7 @@ func (m *model) attemptCatch() {
 	}
 	bt.log = appendLog(bt.log, foe.Name()+" broke free!")
 	// A failed catch costs the turn: skip (no-op self-switch) and let the foe act.
-	ev := bt.b.ResolveTurn(mon.Action{Kind: mon.Switch, Index: bt.b.ActiveIndex(true)}, bt.b.ChooseAI(false))
-	bt.log = appendLog(bt.log, ev...)
-	m.afterTurn()
+	m.resolveTurn(mon.Action{Kind: mon.Switch, Index: bt.b.ActiveIndex(true)}, false, mon.Plain)
 }
 
 // afterTurn checks for end-of-battle, awards XP, or prompts a forced switch.
@@ -301,19 +307,30 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	m.scr.FillRect(0, 0, pw, ph, canvas.Color(0x0C0C0C))
 	m.scr.FillRect(0, ph*52/100, pw, ph-ph*52/100, canvas.Color(0x141414))
 
-	// Foe (upper-right) on a platform, with its info card upper-left.
+	// Advance the HP-bar easing and hit/faint reactions for both sides.
 	foe := bt.b.Active(false)
+	you := bt.b.Active(true)
+	m.foeFX.sync(foe.Name(), foe.CurHP, foe.MaxHP())
+	m.youFX.sync(you.Name(), you.CurHP, you.MaxHP())
+
+	// Foe (upper-right) on a platform, with its info card upper-left.
 	fx, fy := pw*70/100, ph*36/100
 	drawPlatform(m.scr, fx, fy+34, 70)
-	mon.DrawCreature(m.scr, fx, fy+bob, 3, foe.Species)
-	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, foe.CurHP, foe.MaxHP(), false)
+	if !m.foeFX.gone() {
+		mon.DrawCreature(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, foe.Species)
+	}
+	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, m.foeFX.shownHP(), foe.MaxHP(), false)
 
 	// Player active (lower-left), bigger, info card lower-right.
-	you := bt.b.Active(true)
 	yx, yy := pw*30/100, ph*72/100
 	drawPlatform(m.scr, yx, yy+20, 92)
-	mon.DrawCreature(m.scr, yx, yy-10+bob, 4, you.Species)
-	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, you.CurHP, you.MaxHP(), true)
+	if !m.youFX.gone() {
+		mon.DrawCreature(m.scr, yx+m.youFX.shakeX(), yy-10+bob+m.youFX.sinkY(), 4, you.Species)
+	}
+	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, m.youFX.shownHP(), you.MaxHP(), true)
+
+	// Move casts and impact bursts for the current turn.
+	m.anim.draw(m.scr, yx, yy-10, fx, fy)
 
 	// Bottom command bar: log on the left, contextual UI on the right.
 	barY := ph - 104

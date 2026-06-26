@@ -17,6 +17,11 @@ type Match struct {
 	log      []string
 	done     bool
 	winnerA  bool
+
+	// last-resolved-turn effects, for the renderers to animate.
+	turnSeq              int
+	lastTypeA, lastTypeB Type
+	lastCastA, lastCastB bool
 }
 
 // NewMatch builds a duel between two teams, healing both to full so the fight is
@@ -64,6 +69,9 @@ func (m *Match) Submit(sideA bool, act Action) {
 		}
 	}
 	if m.pendingA != nil && m.pendingB != nil {
+		m.lastTypeA, m.lastCastA = actionMoveType(m.b.Active(true), *m.pendingA)
+		m.lastTypeB, m.lastCastB = actionMoveType(m.b.Active(false), *m.pendingB)
+		m.turnSeq++
 		m.log = appendTail(m.log, m.b.ResolveTurn(*m.pendingA, *m.pendingB)...)
 		m.pendingA, m.pendingB = nil, nil
 		m.refresh()
@@ -139,6 +147,13 @@ type View struct {
 	AwaitingYou     bool // you must choose an action this turn
 	MustSwitchYou   bool // your active fainted; choose a replacement
 	WaitingOpponent bool // your move is in; waiting on the other player
+
+	// Last-resolved turn, for cast/impact effects.
+	TurnSeq     int
+	YouLastType Type
+	FoeLastType Type
+	YouCast     bool
+	FoeCast     bool
 }
 
 // Snapshot captures everything the given side needs to render, under the lock.
@@ -155,6 +170,14 @@ func (m *Match) Snapshot(sideA bool) View {
 		Log:      append([]string(nil), m.log...),
 		Done:     m.done,
 		YouWon:   m.winnerA == sideA,
+		TurnSeq:  m.turnSeq,
+	}
+	if sideA {
+		v.YouLastType, v.YouCast = m.lastTypeA, m.lastCastA
+		v.FoeLastType, v.FoeCast = m.lastTypeB, m.lastCastB
+	} else {
+		v.YouLastType, v.YouCast = m.lastTypeB, m.lastCastB
+		v.FoeLastType, v.FoeCast = m.lastTypeA, m.lastCastA
 	}
 	for i, c := range m.b.Team(sideA) {
 		v.Party = append(v.Party, PartyMember{
@@ -191,6 +214,19 @@ func (m *Match) ActiveIndexFor(sideA bool) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.b.ActiveIndex(sideA)
+}
+
+// actionMoveType returns the elemental type of an attack action and whether it
+// is a damaging move worth animating a cast for.
+func actionMoveType(c *Creature, act Action) (Type, bool) {
+	if act.Kind != Attack || act.Index < 0 || act.Index >= len(c.Moves) {
+		return Plain, false
+	}
+	mv, ok := moves[c.Moves[act.Index]]
+	if !ok {
+		return Plain, false
+	}
+	return mv.Type, mv.Power > 0
 }
 
 // appendTail keeps a log to a recent window.

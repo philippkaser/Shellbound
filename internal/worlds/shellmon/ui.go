@@ -31,9 +31,9 @@ const (
 )
 
 // panel draws a filled, bordered box.
-func (m *model) panel(x, y, w, h int) {
-	m.scr.FillRect(x, y, w, h, uiFill)
-	m.scr.Rect(x, y, w, h, uiBorder)
+func panel(c *canvas.Canvas, x, y, w, h int) {
+	c.FillRect(x, y, w, h, uiFill)
+	c.Rect(x, y, w, h, uiBorder)
 }
 
 // itoa is a tiny int formatter (the package stays import-light like the engine).
@@ -60,7 +60,7 @@ func itoa(n int) string {
 }
 
 // hpBar draws a health bar of width w at (x, y) for cur/max HP.
-func (m *model) hpBar(x, y, w, cur, max int) {
+func hpBar(c *canvas.Canvas, x, y, w, cur, max int) {
 	if max < 1 {
 		max = 1
 	}
@@ -68,33 +68,33 @@ func (m *model) hpBar(x, y, w, cur, max int) {
 		cur = 0
 	}
 	const h = 6
-	m.scr.FillRect(x, y, w, h, uiTrack)
-	m.scr.Rect(x-1, y-1, w+2, h+2, uiDim)
+	c.FillRect(x, y, w, h, uiTrack)
+	c.Rect(x-1, y-1, w+2, h+2, uiDim)
 	fill := (w - 2) * cur / max
 	col := uiBar
 	if cur*4 <= max {
 		col = uiBarLow // low health reads dimmer
 	}
 	if fill > 0 {
-		m.scr.FillRect(x+1, y+1, fill, h-2, col)
+		c.FillRect(x+1, y+1, fill, h-2, col)
 	}
 }
 
-// infoCard draws a creature's name, level and HP bar in a small box anchored at
-// (x, y). withHP shows the numeric HP under the bar (used for the player side).
-func (m *model) infoCard(x, y, w int, c *mon.Creature, withHP bool) {
+// infoCard draws a name, level and HP bar in a small box anchored at (x, y).
+// withHP shows the numeric HP under the bar (used for the player side).
+func infoCard(c *canvas.Canvas, x, y, w int, name string, level, cur, max int, withHP bool) {
 	h := 30
 	if withHP {
 		h = 40
 	}
-	m.panel(x, y, w, h)
-	m.scr.DrawText(x+8, y+6, c.Name(), uiText)
-	lv := "Lv" + itoa(c.Level)
-	m.scr.DrawText(x+w-canvas.TextWidth(lv)-8, y+6, lv, uiDim)
-	m.hpBar(x+8, y+18, w-16, c.CurHP, c.MaxHP())
+	panel(c, x, y, w, h)
+	c.DrawText(x+8, y+6, name, uiText)
+	lv := "Lv" + itoa(level)
+	c.DrawText(x+w-canvas.TextWidth(lv)-8, y+6, lv, uiDim)
+	hpBar(c, x+8, y+18, w-16, cur, max)
 	if withHP {
-		hp := itoa(c.CurHP) + "/" + itoa(c.MaxHP())
-		m.scr.DrawText(x+w-canvas.TextWidth(hp)-8, y+27, hp, uiDim)
+		hp := itoa(cur) + "/" + itoa(max)
+		c.DrawText(x+w-canvas.TextWidth(hp)-8, y+27, hp, uiDim)
 	}
 }
 

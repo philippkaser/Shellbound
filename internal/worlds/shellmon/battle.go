@@ -306,18 +306,18 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	fx, fy := pw*70/100, ph*36/100
 	drawPlatform(m.scr, fx, fy+34, 70)
 	mon.DrawCreature(m.scr, fx, fy+bob, 3, foe.Species)
-	m.infoCard(30, 40, 250, foe, false)
+	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, foe.CurHP, foe.MaxHP(), false)
 
 	// Player active (lower-left), bigger, info card lower-right.
 	you := bt.b.Active(true)
 	yx, yy := pw*30/100, ph*72/100
 	drawPlatform(m.scr, yx, yy+20, 92)
 	mon.DrawCreature(m.scr, yx, yy-10+bob, 4, you.Species)
-	m.infoCard(pw-290, ph*52/100, 260, you, true)
+	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, you.CurHP, you.MaxHP(), true)
 
 	// Bottom command bar: log on the left, contextual UI on the right.
 	barY := ph - 104
-	m.panel(16, barY, pw-32, 92)
+	panel(m.scr, 16, barY, pw-32, 92)
 	m.drawLog(28, barY+10, pw*55/100)
 	rx := pw * 58 / 100
 	switch bt.sub {

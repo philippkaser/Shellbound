@@ -14,6 +14,7 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/login"
 	"github.com/shellbound/shellbound/internal/ui/overworld"
 	"github.com/shellbound/shellbound/internal/world"
+	shellmonworld "github.com/shellbound/shellbound/internal/worlds/shellmon"
 )
 
 // appState is which top-level screen owns input.
@@ -211,6 +212,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case overworld.EnterPortalMsg:
 		return a.enterWorld(msg)
 
+	case overworld.StartPvPMsg:
+		return a.enterPvP(msg)
+
 	case worldExitMsg:
 		if msg.gen == a.worldGen && a.state == stateWorld {
 			a.state = statePlaza
@@ -218,6 +222,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s.Stop() // halt the world's renderer before we drop it
 			}
 			a.worldModel = nil
+			if a.handle != nil {
+				a.handle.SetBusy(false)
+			}
 			a.over = a.over.ResumeFromWorld()
 			// Clear the world's text screen, then repaint the plaza frame.
 			var cmd tea.Cmd
@@ -308,8 +315,42 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 		a.deps.onTeardown(s.Stop)
 	}
 	a.state = stateWorld
+	if a.handle != nil {
+		a.handle.SetBusy(true) // can't be challenged while inside a world
+	}
 	// The plaza must stop painting Sixel frames while the world owns the
 	// screen; clear its last frame so the world's text renders cleanly.
+	a.over = a.over.SetActive(false)
+
+	cmds := []tea.Cmd{tea.ClearScreen, a.worldModel.Init()}
+	if a.lastSize.Width > 0 {
+		var cmd tea.Cmd
+		a.worldModel, cmd = a.worldModel.Update(a.lastSize)
+		cmds = append(cmds, cmd)
+	}
+	return a, tea.Batch(cmds...)
+}
+
+// enterPvP swaps in a shared Shellmon duel when a challenge is accepted.
+func (a *app) enterPvP(msg overworld.StartPvPMsg) (tea.Model, tea.Cmd) {
+	a.worldGen++
+	gen := a.worldGen
+	exit := func() {
+		select {
+		case a.internal <- worldExitMsg{gen: gen}:
+		default:
+		}
+	}
+	cw, ch := a.cellSize()
+	render := world.Render{Palette: a.deps.env.Pal, Out: a.deps.env.Out, CellW: cw, CellH: ch}
+	a.worldModel = shellmonworld.NewPvP(render, msg.Match, msg.SideA, msg.Opponent, exit)
+	if s, ok := a.worldModel.(interface{ Stop() }); ok {
+		a.deps.onTeardown(s.Stop)
+	}
+	a.state = stateWorld
+	if a.handle != nil {
+		a.handle.SetBusy(true)
+	}
 	a.over = a.over.SetActive(false)
 
 	cmds := []tea.Cmd{tea.ClearScreen, a.worldModel.Init()}

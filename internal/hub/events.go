@@ -1,5 +1,7 @@
 package hub
 
+import "github.com/shellbound/shellbound/internal/shellmon"
+
 // PlayerInfo is the public identity broadcast to other sessions.
 type PlayerInfo struct {
 	ID       int64
@@ -77,10 +79,31 @@ type EvEmote struct {
 	Kind     string
 }
 
-func (EvJoin) isEvent()    {}
-func (EvLeave) isEvent()   {}
-func (EvMoves) isEvent()   {}
-func (EvChat) isEvent()    {}
-func (EvWhisper) isEvent() {}
-func (EvKick) isEvent()    {}
-func (EvEmote) isEvent()   {}
+// EvBattleChallenge tells a player someone has challenged them to a Shellmon
+// duel. The recipient accepts or declines.
+type EvBattleChallenge struct{ From PlayerInfo }
+
+// EvBattleDeclined tells the challenger their challenge was declined or expired.
+type EvBattleDeclined struct {
+	From   PlayerInfo
+	Reason string
+}
+
+// EvBattleStart drops a player into a shared PvP battle. Match is the single
+// coordinator both sides hold; SideA says which side of it this player is.
+type EvBattleStart struct {
+	Match    *shellmon.Match
+	SideA    bool
+	Opponent PlayerInfo
+}
+
+func (EvJoin) isEvent()            {}
+func (EvLeave) isEvent()           {}
+func (EvMoves) isEvent()           {}
+func (EvChat) isEvent()            {}
+func (EvWhisper) isEvent()         {}
+func (EvKick) isEvent()            {}
+func (EvEmote) isEvent()           {}
+func (EvBattleChallenge) isEvent() {}
+func (EvBattleDeclined) isEvent()  {}
+func (EvBattleStart) isEvent()     {}

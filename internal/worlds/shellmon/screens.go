@@ -44,7 +44,7 @@ func (m *model) drawStarter(pw, ph int, t float64) {
 	for i, sp := range m.starters {
 		x := x0 + i*(cardW+gap)
 		y := cy - cardH/2
-		m.panel(x, y, cardW, cardH)
+		panel(m.scr, x, y, cardW, cardH)
 		if i == m.starterCursor {
 			m.scr.Rect(x-2, y-2, cardW+4, cardH+4, uiBorder)
 			m.scr.Rect(x-3, y-3, cardW+6, cardH+6, uiDim)
@@ -106,7 +106,7 @@ func (m *model) drawParty(pw, ph int, t float64) {
 		m.scr.DrawText(lx, y, c.Name(), uiText)
 		lv := "Lv" + itoa(c.Level) + " " + typeBadge(c.Type())
 		m.scr.DrawText(lx+180, y, lv, uiDim)
-		m.hpBar(lx, y+14, 300, c.CurHP, c.MaxHP())
+		hpBar(m.scr, lx, y+14, 300, c.CurHP, c.MaxHP())
 		if i == 0 {
 			m.scr.DrawText(lx+180+canvas.TextWidth(lv)+10, y, "lead", uiDim)
 		}

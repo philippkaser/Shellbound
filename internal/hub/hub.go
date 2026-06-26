@@ -13,7 +13,12 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/shellbound/shellbound/internal/shellmon"
 )
+
+// challengeTTL is how long a pending PvP challenge stays valid.
+const challengeTTL = 30 * time.Second
 
 // eventBuffer is the per-session channel depth. A session that stalls past
 // this many pending events starts losing them (drop-oldest-first would be
@@ -30,6 +35,16 @@ type session struct {
 	state  PlayerState
 	dirty  bool
 	closed bool
+	busy   bool // inside a portal world or a PvP battle — not challengeable
+}
+
+// pendingChallenge is a PvP challenge awaiting the target's response.
+type pendingChallenge struct {
+	fromID   int64
+	fromSID  string
+	fromInfo PlayerInfo
+	team     []*shellmon.Creature
+	at       time.Time
 }
 
 // Hub holds every online player. Create with New, start the movement
@@ -38,13 +53,17 @@ type Hub struct {
 	mu       sync.RWMutex
 	sessions map[string]*session // by SSH session id
 	byPlayer map[int64]string    // player id -> session id
+	// challenges holds the pending PvP challenge per target player id (one at a
+	// time; a fresh challenge replaces an older one).
+	challenges map[int64]pendingChallenge
 }
 
 // New creates an empty hub.
 func New() *Hub {
 	return &Hub{
-		sessions: make(map[string]*session),
-		byPlayer: make(map[int64]string),
+		sessions:   make(map[string]*session),
+		byPlayer:   make(map[int64]string),
+		challenges: make(map[int64]pendingChallenge),
 	}
 }
 
@@ -152,6 +171,7 @@ func (h *Hub) leave(sessionID string) {
 	if h.byPlayer[s.info.ID] == sessionID {
 		delete(h.byPlayer, s.info.ID)
 	}
+	h.dropChallengesFor(s.info.ID)
 	s.closed = true
 	close(s.ch)
 	ev := EvLeave{PlayerID: s.info.ID, Name: s.info.Name}
@@ -215,6 +235,85 @@ func (h *Hub) emote(sessionID, kind string) {
 	ev := EvEmote{PlayerID: s.info.ID, Kind: kind}
 	for _, other := range h.sessions {
 		other.send(ev)
+	}
+}
+
+// setBusy flags a session as in-world/in-battle (so it can't be challenged).
+func (h *Hub) setBusy(sessionID string, busy bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s, ok := h.sessions[sessionID]; ok {
+		s.busy = busy
+	}
+}
+
+// challengePvP records a challenge to a target player and notifies them. It
+// reports whether the challenge was delivered, and if not, why.
+func (h *Hub) challengePvP(fromSID string, toPlayerID int64, team []*shellmon.Creature) (bool, string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	from, ok := h.sessions[fromSID]
+	if !ok {
+		return false, "you are not connected"
+	}
+	toSID, ok := h.byPlayer[toPlayerID]
+	if !ok {
+		return false, "they're not online"
+	}
+	to := h.sessions[toSID]
+	if to == nil || to.closed {
+		return false, "they're not online"
+	}
+	if to.busy {
+		return false, to.info.Name + " is busy"
+	}
+	h.challenges[toPlayerID] = pendingChallenge{
+		fromID: from.info.ID, fromSID: fromSID, fromInfo: from.info, team: team, at: time.Now(),
+	}
+	to.send(EvBattleChallenge{From: from.info})
+	return true, ""
+}
+
+// respondPvP resolves a pending challenge held by the responding player. On
+// accept (with a non-empty team) it builds the shared match and drops both
+// players into it; on decline it notifies the challenger.
+func (h *Hub) respondPvP(responderSID string, challengerID int64, accept bool, team []*shellmon.Creature) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	resp, ok := h.sessions[responderSID]
+	if !ok {
+		return
+	}
+	pc, ok := h.challenges[resp.info.ID]
+	if !ok || pc.fromID != challengerID || time.Since(pc.at) > challengeTTL {
+		return // stale or mismatched
+	}
+	delete(h.challenges, resp.info.ID)
+
+	chSID, ok := h.byPlayer[challengerID]
+	chSession := h.sessions[chSID]
+	if !accept || !ok || chSession == nil || chSession.closed {
+		if chSession != nil {
+			chSession.send(EvBattleDeclined{From: resp.info, Reason: resp.info.Name + " declined."})
+		}
+		return
+	}
+
+	// Build the single shared match (challenger = side A) and start both sides.
+	match := shellmon.NewMatch(pc.team, team, time.Now().UnixNano())
+	resp.busy, chSession.busy = true, true
+	chSession.send(EvBattleStart{Match: match, SideA: true, Opponent: resp.info})
+	resp.send(EvBattleStart{Match: match, SideA: false, Opponent: pc.fromInfo})
+}
+
+// dropChallengesFor removes any pending challenge to or from a player (called on
+// leave so a vanished player leaves no dangling challenge).
+func (h *Hub) dropChallengesFor(playerID int64) {
+	delete(h.challenges, playerID)
+	for target, pc := range h.challenges {
+		if pc.fromID == playerID {
+			delete(h.challenges, target)
+		}
 	}
 }
 
@@ -293,6 +392,22 @@ func (hd *Handle) Emote(text string) { hd.hub.chat(hd.sid, text, true) }
 
 // PlayEmote broadcasts a visual gesture (an emote key) to everyone nearby.
 func (hd *Handle) PlayEmote(kind string) { hd.hub.emote(hd.sid, kind) }
+
+// SetBusy marks this session as in a world/battle (or back in the plaza), which
+// gates whether others can challenge it.
+func (hd *Handle) SetBusy(busy bool) { hd.hub.setBusy(hd.sid, busy) }
+
+// ChallengePvP challenges another player to a Shellmon duel, attaching this
+// player's team. Returns whether it was sent and, if not, a short reason.
+func (hd *Handle) ChallengePvP(toPlayerID int64, team []*shellmon.Creature) (bool, string) {
+	return hd.hub.challengePvP(hd.sid, toPlayerID, team)
+}
+
+// RespondPvP accepts or declines a pending challenge from challengerID; on
+// accept, team is this player's roster.
+func (hd *Handle) RespondPvP(challengerID int64, accept bool, team []*shellmon.Creature) {
+	hd.hub.respondPvP(hd.sid, challengerID, accept, team)
+}
 
 // Whisper delivers a DM live if the recipient is online; persistence is
 // the caller's job. Returns whether it was delivered.

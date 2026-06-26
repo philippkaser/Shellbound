@@ -146,7 +146,7 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 	sprites.Draw(m.scr, footX, footY, r.facing, 0, false)
 
 	// HUD.
-	m.panel(16, 14, 200, 24)
+	panel(m.scr, 16, 14, 200, 24)
 	m.scr.DrawText(26, 22, "Wild Route", uiText)
 	lead := ""
 	if len(m.roster) > 0 {

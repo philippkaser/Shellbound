@@ -181,8 +181,18 @@ Enter on a name pre-fills a `/w` to them.
   Trigger them with `/wave`-style commands or the `g` quick-picker.
 - **Player interactions.** Walk up to someone and press `x` to open their card —
   name, what they're wearing, how long they've wandered Shellbound — with quick
-  actions to whisper (`w`) or friend (`f`) them. The same walk-up-and-target hook
-  is what a future PvP challenge will hang off.
+  actions to whisper (`w`), friend (`f`) or challenge them to a Shellmon duel
+  (`v`).
+- **Shellmon PvP.** Challenging from the inspect card sends a duel invite through
+  the hub; the target gets a modal accept/decline prompt. On accept, the hub
+  loads both players' saved teams, heals them, builds one shared
+  `shellmon.Match` and drops both sessions into it. Because every session runs
+  in the same server process, the two clients hold the *same* mutex-guarded
+  match: each submits its action for the turn, the turn resolves once both are
+  in, and each side polls a race-free `Snapshot` at its render tick — no battle
+  state crosses a wire, only the handshake. The duel uses copies of the rosters,
+  so nobody's saved party is changed. Players in a world (or a duel) are flagged
+  busy and can't be challenged.
 - **Worlds.** Portals reference `world.World` implementations from a
   registry. A world receives a `Context` carrying save/inventory APIs
   pre-bound to `(player, world key)` — it cannot touch any other slot — plus
@@ -240,11 +250,11 @@ Enter on a name pre-fills a `/w` to them.
   Doom → a raycast FPS, and Shellmon → a creature collector with a 6v6
   battle engine, all granting progression through the real save/inventory
   pipelines.
-- **Next** — Shellmon **PvP**: challenge a nearby player in the plaza and
-  fight 6v6 over the hub with the same engine.
-- **Later** — trainer battles and a route boss for Shellmon; the Doom portal
-  doing whatever a terminal can get away with; player-placed decorations;
-  moderation tools.
+- **Done** — Shellmon **PvP**: challenge a nearby player from their inspect card
+  and fight 6v6 over the hub with the same engine.
+- **Later** — trainer battles and a route boss for Shellmon; spectating duels;
+  the Doom portal doing whatever a terminal can get away with; player-placed
+  decorations; moderation tools.
 
 ## Repository layout
 

@@ -21,6 +21,7 @@ import (
 	"github.com/shellbound/shellbound/internal/plaza"
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/syncwriter"
+	mon "github.com/shellbound/shellbound/internal/shellmon"
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
 	"github.com/shellbound/shellbound/internal/ui/chat"
@@ -75,6 +76,23 @@ type EnterPortalMsg struct {
 // DisconnectMsg asks the session app to end the session.
 type DisconnectMsg struct {
 	Reason string
+}
+
+// StartPvPMsg asks the session app to drop the player into a shared Shellmon
+// duel. The Match is the coordinator both players hold.
+type StartPvPMsg struct {
+	Match    *mon.Match
+	SideA    bool
+	Opponent string
+}
+
+// shellmonWorldKey scopes the saved Shellmon roster (matches the portal key).
+const shellmonWorldKey = "shellmon"
+
+// pvpChallenge is an incoming duel invite awaiting this player's response.
+type pvpChallenge struct {
+	fromID int64
+	name   string
 }
 
 // PixelSizeMsg carries the terminal's cell grid AND drawable pixels together
@@ -168,6 +186,9 @@ type Model struct {
 
 	// inspecting holds the player whose card is open (nil = none).
 	inspecting *inspectInfo
+
+	// challenge holds an incoming PvP duel invite (nil = none).
+	challenge *pvpChallenge
 
 	// emotes holds each player's in-flight gesture (including our own); entries
 	// are pruned once older than emote.Dur.
@@ -283,6 +304,13 @@ func (m *Model) publish() {
 		panel = emoteMenuLines()
 	case m.inspecting != nil:
 		panel = m.inspectLines()
+	case m.challenge != nil:
+		panel = []string{
+			"Battle Challenge", "",
+			m.challenge.name + " wants to duel!",
+			"(your full team, healed)", "",
+			"y accept   n decline",
+		}
 	}
 
 	// Contextual bottom-of-screen nudges, only when nothing holds focus.
@@ -425,6 +453,11 @@ func (m Model) handleKey(key tea.KeyMsg) (Model, tea.Cmd) {
 		return m, func() tea.Msg { return DisconnectMsg{Reason: "bye"} }
 	}
 
+	// An incoming duel challenge is modal: answer it before anything else.
+	if m.challenge != nil {
+		return m.updateChallenge(key)
+	}
+
 	if m.chat.IsOpen() {
 		cmd, submitted := m.chat.Update(key)
 		if submitted != "" {
@@ -541,7 +574,7 @@ func (m Model) tickMove() (Model, tea.Cmd) {
 		return m, nil
 	}
 	// A panel or the chat console stole focus — stop walking.
-	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() || m.emoteMenu || m.inspecting != nil {
+	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() || m.emoteMenu || m.inspecting != nil || m.challenge != nil {
 		return m.stopWalk(), nil
 	}
 	window := tapWindow
@@ -763,7 +796,7 @@ func (m *Model) openInspect(st hub.PlayerState) {
 }
 
 // updateInspect handles keys while a player's card is open: w pre-fills a
-// whisper, f friends them, Esc/x closes.
+// whisper, f friends them, v challenges them to a Shellmon duel, Esc/x closes.
 func (m Model) updateInspect(key tea.KeyMsg) (Model, tea.Cmd) {
 	card := m.inspecting
 	switch key.String() {
@@ -779,6 +812,52 @@ func (m Model) updateInspect(key tea.KeyMsg) (Model, tea.Cmd) {
 			m.toasts.Show("could not add friend")
 		}
 		m.inspecting = nil
+	case "v":
+		m.sendChallenge(card.id, card.name)
+		m.inspecting = nil
+	}
+	return m, nil
+}
+
+// shellmonTeam loads this player's saved Shellmon roster.
+func (m Model) shellmonTeam() []*mon.Creature {
+	data, err := m.repos.Saves.Load(m.player.ID, shellmonWorldKey)
+	if err != nil {
+		return nil
+	}
+	return mon.UnmarshalParty(data)
+}
+
+// sendChallenge invites another player to a Shellmon duel, attaching our team.
+func (m *Model) sendChallenge(toID int64, name string) {
+	team := m.shellmonTeam()
+	if len(team) == 0 {
+		m.toasts.Show("catch some Shellmon first — visit the portal")
+		return
+	}
+	if ok, reason := m.handle.ChallengePvP(toID, team); ok {
+		m.toasts.Show("challenge sent to " + name)
+	} else {
+		m.toasts.Show(reason)
+	}
+}
+
+// updateChallenge handles the incoming-duel prompt: y accepts, n/esc declines.
+func (m Model) updateChallenge(key tea.KeyMsg) (Model, tea.Cmd) {
+	ch := m.challenge
+	switch key.String() {
+	case "y", "enter":
+		team := m.shellmonTeam()
+		if len(team) == 0 {
+			m.toasts.Show("you have no Shellmon to battle with")
+			m.handle.RespondPvP(ch.fromID, false, nil)
+		} else {
+			m.handle.RespondPvP(ch.fromID, true, team)
+		}
+		m.challenge = nil
+	case "n", "esc", "q":
+		m.handle.RespondPvP(ch.fromID, false, nil)
+		m.challenge = nil
 	}
 	return m, nil
 }
@@ -795,7 +874,7 @@ func (m Model) inspectLines() []string {
 	if c.since != "" {
 		out = append(out, "wandering since "+c.since)
 	}
-	return append(out, "", "w whisper · f friend · Esc close")
+	return append(out, "", "w whisper · f friend · v duel · Esc close")
 }
 
 // ownedCosmetics returns the set of unlockable cosmetic keys the player owns,
@@ -953,6 +1032,20 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 	case hub.EvEmote:
 		if emote.Valid(ev.Kind) {
 			m.emotes[ev.PlayerID] = emoteState{kind: ev.Kind, start: time.Now()}
+		}
+
+	case hub.EvBattleChallenge:
+		m.challenge = &pvpChallenge{fromID: ev.From.ID, name: ev.From.Name}
+		m.toasts.Show(ev.From.Name + " challenges you!")
+
+	case hub.EvBattleDeclined:
+		m.toasts.Show(ev.Reason)
+
+	case hub.EvBattleStart:
+		m.challenge = nil
+		match, sideA, opp := ev.Match, ev.SideA, ev.Opponent.Name
+		return m, func() tea.Msg {
+			return StartPvPMsg{Match: match, SideA: sideA, Opponent: opp}
 		}
 
 	case hub.EvKick:

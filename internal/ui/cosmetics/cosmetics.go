@@ -116,9 +116,18 @@ func (m *Model) Lines() []string {
 		if c.Key == m.equipped {
 			mark = "*"
 		}
-		out = append(out, cursor+mark+" "+c.Name)
+		out = append(out, cursor+mark+" "+pad(c.Name, 18)+c.Rarity.Label())
 	}
 	return append(out, "", "up/down select  Enter wear  Esc close")
+}
+
+// pad right-pads s with spaces to at least n columns so the tier column lines
+// up in the fixed-width panel font.
+func pad(s string, n int) string {
+	if len(s) >= n {
+		return s + " "
+	}
+	return s + strings.Repeat(" ", n-len(s))
 }
 
 // View renders the panel box (unused on the Sixel path, kept for parity).

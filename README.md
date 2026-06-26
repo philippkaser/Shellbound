@@ -200,9 +200,13 @@ Enter on a name pre-fills a `/w` to them.
   the same monochrome, overhead-lit style. Pieces come from three places:
   starters everyone has (cap, headband, top hat, antenna), rewards for clearing
   the worlds (crown, horns, halo), and shop stock bought with coins (beanie,
-  bow, visor, flower crown, wizard hat). The wardrobe panel (`c`) lists what you
-  own — starters ∪ inventory grants keyed `cosmetic.*`; the equipped piece is
-  persisted on the player row and broadcast through the hub so everyone sees it.
+  bow, visor, flower crown, wizard hat). Each carries a **rarity tier** —
+  Common, Rare, Epic, Legendary (shown as a text label, since the strict color
+  discipline reserves color for names, chat and portals) — surfaced in the shop,
+  the wardrobe, and a player's inspect card. The wardrobe panel (`c`) lists what
+  you own — starters ∪ inventory grants keyed `cosmetic.*`; the equipped piece
+  is persisted on the player row and broadcast through the hub so everyone sees
+  it.
 - **Coins & the shop.** A soft currency earned passively: one coin every
   ~20 seconds you're in the plaza (time inside a portal world doesn't pay, so
   the reward is for hanging around the shared space), persisted as it lands and

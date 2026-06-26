@@ -107,6 +107,7 @@ type inspectInfo struct {
 	id           int64
 	name         string
 	cosmeticName string
+	cosmeticTier string // rarity label of the worn piece ("" for bare-headed)
 	since        string
 }
 
@@ -746,10 +747,14 @@ func (m Model) nearestPlayer() (hub.PlayerState, bool) {
 // openInspect builds the inspect card for a remote player, pulling their join
 // date from storage (only their public identity is broadcast live).
 func (m *Model) openInspect(st hub.PlayerState) {
+	key := st.Info.Cosmetic
 	card := &inspectInfo{
 		id:           st.Info.ID,
 		name:         st.Info.Name,
-		cosmeticName: cosmetic.Name(st.Info.Cosmetic),
+		cosmeticName: cosmetic.Name(key),
+	}
+	if cosmetic.Valid(key) && key != "" && key != "none" {
+		card.cosmeticTier = cosmetic.RarityOf(key).Label()
 	}
 	if p, err := m.repos.Players.ByID(st.Info.ID); err == nil && p != nil {
 		card.since = p.CreatedAt.Format("Jan 2006")
@@ -782,7 +787,11 @@ func (m Model) updateInspect(key tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) inspectLines() []string {
 	c := m.inspecting
 	out := []string{c.name, ""}
-	out = append(out, "wearing: "+c.cosmeticName)
+	wearing := "wearing: " + c.cosmeticName
+	if c.cosmeticTier != "" {
+		wearing += " (" + c.cosmeticTier + ")"
+	}
+	out = append(out, wearing)
 	if c.since != "" {
 		out = append(out, "wandering since "+c.since)
 	}

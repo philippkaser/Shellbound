@@ -127,7 +127,7 @@ func (m *Model) Lines() []string {
 		} else if c.Price > m.balance {
 			mark = "-" // can't afford yet
 		}
-		out = append(out, cursor+mark+" "+pad(c.Name, 18)+tail)
+		out = append(out, cursor+mark+" "+pad(c.Name, 16)+pad(c.Rarity.Label(), 10)+tail)
 	}
 	return append(out, "", "up/down select  Enter buy  Esc close")
 }

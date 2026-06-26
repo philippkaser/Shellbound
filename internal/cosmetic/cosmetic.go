@@ -18,6 +18,33 @@ import (
 // inventory, e.g. "cosmetic.horns" unlocks the "horns" cosmetic.
 const InventoryPrefix = "cosmetic."
 
+// Rarity is a cosmetic's prestige tier. It's shown as a label in the shop and
+// wardrobe; the world's strict color discipline means tiers read as text, not
+// color.
+type Rarity int
+
+// Rarity tiers, ascending.
+const (
+	Common Rarity = iota
+	Rare
+	Epic
+	Legendary
+)
+
+// Label is the human name of a tier.
+func (r Rarity) Label() string {
+	switch r {
+	case Rare:
+		return "Rare"
+	case Epic:
+		return "Epic"
+	case Legendary:
+		return "Legendary"
+	default:
+		return "Common"
+	}
+}
+
 // Cosmetic is one wearable. draw is nil for the bare-headed "none".
 //
 // Ownership comes from one of three places: Starter pieces belong to everyone;
@@ -28,8 +55,9 @@ const InventoryPrefix = "cosmetic."
 type Cosmetic struct {
 	Key     string
 	Name    string
-	Starter bool // owned by everyone from the start
-	Price   int  // coin cost at the shop; 0 means not for sale
+	Starter bool   // owned by everyone from the start
+	Price   int    // coin cost at the shop; 0 means not for sale
+	Rarity  Rarity // prestige tier shown in the shop/wardrobe
 	draw    func(c *canvas.Canvas, hx, hy, hr int, f sprites.Facing, t float64)
 }
 
@@ -43,21 +71,21 @@ const (
 
 // catalog is the full set, in display order.
 var catalog = []Cosmetic{
-	{Key: "none", Name: "Bare-headed", Starter: true},
-	{Key: "cap", Name: "Flat Cap", Starter: true, draw: drawCap},
-	{Key: "band", Name: "Headband", Starter: true, draw: drawBand},
-	{Key: "tophat", Name: "Top Hat", Starter: true, draw: drawTopHat},
-	{Key: "antenna", Name: "Antenna", Starter: true, draw: drawAntenna},
-	{Key: "crown", Name: "Sparkforged Crown", draw: drawCrown}, // Bomberman reward
-	{Key: "horns", Name: "Hellbreaker Horns", draw: drawHorns}, // Doom reward
-	{Key: "halo", Name: "Wanderer's Halo", draw: drawHalo},     // (future reward)
+	{Key: "none", Name: "Bare-headed", Starter: true, Rarity: Common},
+	{Key: "cap", Name: "Flat Cap", Starter: true, Rarity: Common, draw: drawCap},
+	{Key: "band", Name: "Headband", Starter: true, Rarity: Common, draw: drawBand},
+	{Key: "tophat", Name: "Top Hat", Starter: true, Rarity: Common, draw: drawTopHat},
+	{Key: "antenna", Name: "Antenna", Starter: true, Rarity: Common, draw: drawAntenna},
+	{Key: "crown", Name: "Sparkforged Crown", Rarity: Epic, draw: drawCrown},  // Bomberman reward
+	{Key: "horns", Name: "Hellbreaker Horns", Rarity: Epic, draw: drawHorns},  // Doom reward
+	{Key: "halo", Name: "Wanderer's Halo", Rarity: Legendary, draw: drawHalo}, // (future reward)
 
 	// Shop stock — bought with coins earned by being online.
-	{Key: "beanie", Name: "Wool Beanie", Price: 30, draw: drawBeanie},
-	{Key: "bow", Name: "Ribbon Bow", Price: 45, draw: drawBow},
-	{Key: "visor", Name: "Sun Visor", Price: 60, draw: drawVisor},
-	{Key: "flower", Name: "Flower Crown", Price: 90, draw: drawFlower},
-	{Key: "wizard", Name: "Wizard Hat", Price: 120, draw: drawWizard},
+	{Key: "beanie", Name: "Wool Beanie", Price: 30, Rarity: Common, draw: drawBeanie},
+	{Key: "bow", Name: "Ribbon Bow", Price: 45, Rarity: Common, draw: drawBow},
+	{Key: "visor", Name: "Sun Visor", Price: 60, Rarity: Rare, draw: drawVisor},
+	{Key: "flower", Name: "Flower Crown", Price: 90, Rarity: Rare, draw: drawFlower},
+	{Key: "wizard", Name: "Wizard Hat", Price: 120, Rarity: Epic, draw: drawWizard},
 }
 
 var byKey = func() map[string]Cosmetic {
@@ -101,6 +129,9 @@ func Shop() []Cosmetic {
 
 // Price returns a cosmetic's coin cost (0 if unknown or not for sale).
 func Price(key string) int { return byKey[key].Price }
+
+// RarityOf returns a cosmetic's prestige tier (Common if unknown).
+func RarityOf(key string) Rarity { return byKey[key].Rarity }
 
 // Draw paints the equipped cosmetic over the avatar whose feet are at
 // (footX, footY). Unknown keys and "none" draw nothing.

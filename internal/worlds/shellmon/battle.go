@@ -303,9 +303,8 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	bt := m.bt
 	bob := int(2 * sinf(t*2.2))
 
-	// Backdrop: a darker upper field and a lighter ground band.
-	m.scr.FillRect(0, 0, pw, ph, canvas.Color(0x0C0C0C))
-	m.scr.FillRect(0, ph*52/100, pw, ph-ph*52/100, canvas.Color(0x141414))
+	// Backdrop: a graded sky, parallax ridges, clouds and a lit ground.
+	drawArena(m.scr, pw, ph, t)
 
 	// Advance the HP-bar easing and hit/faint reactions for both sides.
 	foe := bt.b.Active(false)

@@ -259,8 +259,7 @@ func (m *pvpModel) draw(pw, ph int, t float64) {
 	v := m.match.Snapshot(m.sideA)
 	bob := int(2 * sinf(t*2.2))
 
-	m.scr.FillRect(0, 0, pw, ph, canvas.Color(0x0C0C0C))
-	m.scr.FillRect(0, ph*52/100, pw, ph-ph*52/100, canvas.Color(0x141414))
+	drawArena(m.scr, pw, ph, t)
 
 	// Opponent banner.
 	banner := "vs " + m.opponent

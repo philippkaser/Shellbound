@@ -110,8 +110,10 @@ type model struct {
 	starterCursor int
 
 	// route
-	route    *routeState
-	partyCur int // cursor in the party view
+	route      *routeState
+	partyCur   int       // cursor in the party view
+	routeMsg   string    // a transient NPC line shown on the route
+	routeMsgAt time.Time // when routeMsg was set
 
 	// battle
 	bt      *battleUI

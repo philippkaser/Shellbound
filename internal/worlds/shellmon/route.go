@@ -2,6 +2,7 @@ package shellmon
 
 import (
 	"sort"
+	"time"
 
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
@@ -30,12 +31,29 @@ const routeLayout = `###################
 #,,,,...,s,...,,,,#
 ###################`
 
+// npc is a non-player character standing on the route, with a flavor line shown
+// when the player bumps into them.
+type npc struct {
+	x, y   int
+	name   string
+	line   string
+	facing sprites.Facing
+}
+
 // routeState is the walkable field and the player's position on it.
 type routeState struct {
 	w, h   int
 	tiles  []byte
 	px, py int
 	facing sprites.Facing
+	npcs   []npc
+}
+
+// routeNPCs are the wanderers dotted around the route (placed on open grass).
+var routeNPCs = []npc{
+	{x: 4, y: 3, name: "Hiker Bram", line: "The tall grass is thick with wild Shellmon — wade in!", facing: sprites.FaceRight},
+	{x: 14, y: 4, name: "Ranger Mossa", line: "Spark singes Bramble, Bramble drinks Tide, Tide douses Spark.", facing: sprites.FaceLeft},
+	{x: 9, y: 7, name: "Kid Pip", line: "A wild Gulper ate my sandwich once. Worth it.", facing: sprites.FaceUp},
 }
 
 // enterRoute (re)builds the route and places the player at the entrance.
@@ -65,6 +83,30 @@ func (m *model) enterRoute() {
 			r.tiles[y*w+x] = t
 		}
 	}
+	// Sprinkle scenery onto open grass: occasional rocks (block) and flower
+	// clusters (decorative), placed deterministically and kept off the entrance.
+	for y := 1; y < h-1; y++ {
+		for x := 1; x < w-1; x++ {
+			if r.tiles[y*w+x] != ',' {
+				continue
+			}
+			if iabs(x-r.px) <= 1 && iabs(y-r.py) <= 1 {
+				continue
+			}
+			switch {
+			case (x*7+y*5)%23 == 0:
+				r.tiles[y*w+x] = 'o' // rock
+			case (x*5+y*9)%19 == 0:
+				r.tiles[y*w+x] = 'f' // flowers
+			}
+		}
+	}
+	r.npcs = append([]npc(nil), routeNPCs...)
+	for _, n := range r.npcs {
+		if n.x > 0 && n.y > 0 && n.x < w-1 && n.y < h-1 {
+			r.tiles[n.y*w+n.x] = '.' // stand on clear ground
+		}
+	}
 	m.route = r
 	m.state = stateRoute
 }
@@ -74,6 +116,25 @@ func (r *routeState) tile(x, y int) byte {
 		return '#'
 	}
 	return r.tiles[y*r.w+x]
+}
+
+// npcAt returns the NPC standing on a cell, if any.
+func (r *routeState) npcAt(x, y int) *npc {
+	for i := range r.npcs {
+		if r.npcs[i].x == x && r.npcs[i].y == y {
+			return &r.npcs[i]
+		}
+	}
+	return nil
+}
+
+// blocks reports whether a cell stops movement (trees, rocks, NPCs).
+func (r *routeState) blocks(x, y int) bool {
+	switch r.tile(x, y) {
+	case '#', 'o':
+		return true
+	}
+	return r.npcAt(x, y) != nil
 }
 
 // keyRoute handles route input; returns true to leave the world.
@@ -102,8 +163,12 @@ func (m *model) keyRoute(key string) bool {
 		return false
 	}
 	nx, ny := r.px+dx, r.py+dy
-	if r.tile(nx, ny) == '#' {
-		return false // blocked by trees
+	if n := r.npcAt(nx, ny); n != nil {
+		m.routeMsg, m.routeMsgAt = n.name+": "+n.line, time.Now()
+		return false // bump into the NPC: chat, don't move
+	}
+	if r.blocks(nx, ny) {
+		return false // trees and rocks block
 	}
 	r.px, r.py = nx, ny
 	if r.tile(nx, ny) == ',' && m.rng.Float64() < encounterRate {
@@ -149,7 +214,8 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 			if px < -iso.TileW || px > pw+iso.TileW || py < -iso.TileH || py > ph+iso.TileH {
 				continue
 			}
-			grass := r.tile(x, y) == ','
+			tile := r.tile(x, y)
+			grass := tile == ',' || tile == 'f'
 			fill := routePath
 			if grass {
 				fill = routeGrass
@@ -160,39 +226,69 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				fill = routePathB
 			}
 			iso.DrawDiamond(m.scr, px, py, fill, routeEdge)
-			if grass {
-				drawGrassTuft(m.scr, px, py+iso.HH, x, y, t)
+			switch tile {
+			case ',':
+				drawTallGrass(m.scr, px, py+iso.HH, x, y, t)
+			case 'f':
+				drawFlowers(m.scr, px, py+iso.HH, x, y, t)
 			}
 		}
 	}
 
-	// Tall things (trees and the player) drawn back-to-front so they occlude.
+	// Tall things (trees, rocks, NPCs and the player) drawn back-to-front.
+	const (
+		kindPlayer = iota
+		kindTree
+		kindRock
+		kindNPC
+	)
 	type tall struct {
 		depth  int
-		tree   bool
+		kind   int
 		px, py int
+		n      *npc
 	}
 	var items []tall
 	for y := 0; y < r.h; y++ {
 		for x := 0; x < r.w; x++ {
-			if r.tile(x, y) != '#' {
+			k := -1
+			switch r.tile(x, y) {
+			case '#':
+				k = kindTree
+			case 'o':
+				k = kindRock
+			}
+			if k < 0 {
 				continue
 			}
 			px, py := project(x, y)
 			if px < -60 || px > pw+60 || py < -80 || py > ph+80 {
 				continue
 			}
-			items = append(items, tall{depth: iso.Depth(x, y), tree: true, px: px, py: py})
+			items = append(items, tall{depth: iso.Depth(x, y), kind: k, px: px, py: py})
 		}
 	}
+	for i := range r.npcs {
+		n := &r.npcs[i]
+		px, py := project(n.x, n.y)
+		items = append(items, tall{depth: iso.Depth(n.x, n.y), kind: kindNPC, px: px, py: py, n: n})
+	}
 	ppx, ppy := project(r.px, r.py)
-	items = append(items, tall{depth: iso.Depth(r.px, r.py), px: ppx, py: ppy})
+	items = append(items, tall{depth: iso.Depth(r.px, r.py), kind: kindPlayer, px: ppx, py: ppy})
 	sort.Slice(items, func(i, j int) bool { return items[i].depth < items[j].depth })
 	for _, it := range items {
-		if it.tree {
-			drawIsoTree(m.scr, it.px, it.py+iso.HH, it.px*3+it.py)
-		} else {
-			footX, footY := it.px, it.py+iso.HH
+		footX, footY := it.px, it.py+iso.HH
+		switch it.kind {
+		case kindTree:
+			drawIsoTree(m.scr, footX, footY, it.px*3+it.py)
+		case kindRock:
+			drawRock(m.scr, footX, footY)
+		case kindNPC:
+			drawContactShadow(m.scr, footX, footY)
+			sprites.Draw(m.scr, footX, footY, it.n.facing, 0, false)
+			nameW := canvas.TextWidth(it.n.name)
+			m.scr.DrawTextShadow(footX-nameW/2, footY-sprites.Height-canvas.LineH, it.n.name, 0xB8B8B8, 0x000000)
+		default:
 			drawContactShadow(m.scr, footX, footY)
 			sprites.Draw(m.scr, footX, footY, r.facing, 0, false)
 		}
@@ -208,25 +304,80 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 	m.scr.DrawText(pw-canvas.TextWidth(lead)-20, 22, lead, uiDim)
 	hint := "WASD walk · search the grass · p team · esc leave"
 	m.scr.DrawText(pw/2-canvas.TextWidth(hint)/2, ph-26, hint, uiDim)
+
+	// A recently bumped NPC's line, in a speech panel near the bottom.
+	if m.routeMsg != "" && time.Since(m.routeMsgAt) < 4*time.Second {
+		w := canvas.TextWidth(m.routeMsg) + 24
+		x := pw/2 - w/2
+		panel(m.scr, x, ph-64, w, 26)
+		m.scr.DrawText(x+12, ph-56, m.routeMsg, uiText)
+	}
 }
 
 // --- isometric route art (monochrome, top-lit like the plaza) ---
 
-// drawGrassTuft scatters a few swaying blades around a tile's ground center.
-func drawGrassTuft(c *canvas.Canvas, cx, cy, gx, gy int, t float64) {
+// drawTallGrass paints a lush, swaying clump of blades on a grass tile — taller
+// and denser than mere texture, so "wild grass" reads as somewhere to search.
+func drawTallGrass(c *canvas.Canvas, cx, cy, gx, gy int, t float64) {
 	seed := gx*7 + gy*13
-	for i := 0; i < 4; i++ {
-		bx := cx - 14 + ((seed + i*13) % 28)
-		by := cy - 4 + ((seed + i*5) % 8)
-		sway := int(sinf(t*1.6+float64(seed+i)) * 1.5)
-		tone := canvas.Color(0x3A3A3A)
-		if i%2 == 0 {
-			tone = canvas.Color(0x2E2E2E)
+	for i := 0; i < 9; i++ {
+		bx := cx - 16 + ((seed + i*9) % 32)
+		base := cy - 2 + ((seed + i*5) % 7)
+		hgt := 7 + (seed+i*3)%5
+		sway := sinf(t*1.7 + float64(seed+i)*0.6)
+		tone := canvas.Color(0x444444)
+		if i%3 == 0 {
+			tone = canvas.Color(0x303030)
 		}
-		c.Set(bx, by, tone)
-		c.Set(bx+sway/2, by-3, tone)
-		c.Set(bx+sway, by-6, tone)
+		// a curved blade: each segment leans a touch further with the wind
+		for s := 0; s <= hgt; s++ {
+			x := bx + int(sway*float64(s)*0.35)
+			c.Set(x, base-s, tone)
+		}
+		c.Set(bx+int(sway*float64(hgt)*0.4), base-hgt-1, canvas.Color(0x5A5A5A)) // tip catch-light
 	}
+}
+
+// drawFlowers paints a small cluster of blossoms on a decorative tile.
+func drawFlowers(c *canvas.Canvas, cx, cy, gx, gy int, t float64) {
+	seed := gx*5 + gy*11
+	for i := 0; i < 3; i++ {
+		fx := cx - 10 + ((seed + i*13) % 20)
+		fy := cy - 2 + ((seed + i*7) % 6)
+		c.VLine(fx, fy, fy+4, canvas.Color(0x3A3A3A)) // stem
+		// four petals around a bright center
+		c.Set(fx, fy-2, canvas.Color(0xCFCFCF))
+		c.Set(fx-1, fy-1, canvas.Color(0x9A9A9A))
+		c.Set(fx+1, fy-1, canvas.Color(0x9A9A9A))
+		c.Set(fx, fy, canvas.Color(0xF2F2F2))
+		c.Set(fx, fy-1, canvas.Color(0xEDEDED))
+	}
+}
+
+// drawRock paints a small top-lit boulder sitting on the ground point.
+func drawRock(c *canvas.Canvas, baseX, baseY int) {
+	for dy := -10; dy <= 0; dy++ {
+		w := int(float64(12) * sqrtClamp(1-float64(dy*dy)/float64(11*11)))
+		v := float64(dy+10) / 12
+		tone := canvas.Color(0x8A8A8A)
+		switch {
+		case v < 0.3:
+			tone = canvas.Color(0xAEAEAE)
+		case v > 0.7:
+			tone = canvas.Color(0x5E5E5E)
+		}
+		for dx := -w; dx <= w; dx++ {
+			col := tone
+			if dx < -w/3 {
+				col = canvas.Color(0x5E5E5E)
+			}
+			c.Set(baseX+dx, baseY-2+dy, col)
+		}
+	}
+	// a couple of cracks
+	c.Set(baseX-1, baseY-6, canvas.Color(0x4A4A4A))
+	c.Set(baseX, baseY-5, canvas.Color(0x4A4A4A))
+	c.Set(baseX+1, baseY-7, canvas.Color(0x4A4A4A))
 }
 
 // drawIsoTree draws a tree rising from the ground point (baseX, baseY): a trunk

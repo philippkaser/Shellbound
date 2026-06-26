@@ -43,6 +43,7 @@ type pvpModel struct {
 	youFX hpFX
 	foeFX hpFX
 	anim  battleAnim
+	trans transition
 }
 
 // NewPvP builds the PvP battle model for one side of a shared match. exit is
@@ -67,6 +68,7 @@ func NewPvP(render world.Render, match *mon.Match, sideA bool, opponent string, 
 	if m.cellH <= 0 {
 		m.cellH = 16
 	}
+	m.trans.begin(0.55) // wipe into the duel
 	return m
 }
 
@@ -248,6 +250,7 @@ func (m *pvpModel) render() {
 	} else {
 		m.draw(pw, ph, t)
 	}
+	m.trans.overlay(m.scr, pw, ph)
 	m.sb.Reset()
 	screen.Place(m.sb, m.scr, m.pal, left, top)
 	if s := m.sb.String(); s != "" {

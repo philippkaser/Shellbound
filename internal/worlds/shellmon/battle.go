@@ -46,6 +46,7 @@ func (m *model) beginBattle(foe *mon.Creature, wild bool) {
 	bt.log = []string{verb}
 	m.bt = bt
 	m.youFX, m.foeFX, m.anim, m.animSeq = hpFX{}, hpFX{}, battleAnim{}, 0
+	m.trans.begin(0.5) // encounter wipe
 	m.state = stateBattle
 }
 
@@ -274,6 +275,7 @@ func (m *model) finishBattle() {
 	}
 	m.bt = nil
 	m.saveRoster()
+	m.trans.begin(0.45) // wipe back out to the route
 	m.state = stateRoute
 }
 

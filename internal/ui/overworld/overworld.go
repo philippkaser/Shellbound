@@ -95,6 +95,22 @@ type pvpChallenge struct {
 	name   string
 }
 
+// Portal transition timing.
+const (
+	portalEnterDur = 0.5 // seconds the portal "swallows" the screen before the world loads
+	portalExitDur  = 0.4 // seconds the plaza fades back in on return
+)
+
+// portalFX drives the colored diamond wipe when stepping through a portal (and
+// the reverse fade when returning).
+type portalFX struct {
+	key     string
+	name    string
+	start   time.Time
+	emitted bool // the EnterPortalMsg has been sent
+	exiting bool // returning to the plaza
+}
+
 // PixelSizeMsg carries the terminal's cell grid AND drawable pixels together
 // (from the SSH pty-req / window-change), so the cell size can be derived from
 // a single consistent pair. Sent only when the client reports pixel
@@ -189,6 +205,9 @@ type Model struct {
 
 	// challenge holds an incoming PvP duel invite (nil = none).
 	challenge *pvpChallenge
+
+	// portal drives the portal-entry/exit transition (nil = none).
+	portal *portalFX
 
 	// emotes holds each player's in-flight gesture (including our own); entries
 	// are pruned once older than emote.Dur.
@@ -338,6 +357,23 @@ func (m *Model) publish() {
 		chatInput = m.chat.InputLine()
 	}
 
+	// Portal wipe parameters (entry swallow / exit fade).
+	var pActive, pExit bool
+	var pProgress float64
+	var pColor canvas.Color
+	if m.portal != nil {
+		pActive, pExit = true, m.portal.exiting
+		dur := portalEnterDur
+		if pExit {
+			dur = portalExitDur
+		}
+		pProgress = time.Since(m.portal.start).Seconds() / dur
+		if pProgress > 1 {
+			pProgress = 1
+		}
+		pColor = plaza.AccentColor(m.portal.key, 0.55)
+	}
+
 	m.renderer.Submit(frameSnapshot{
 		termW: m.termW, termH: m.termH,
 		cellW: m.cellW, cellH: m.cellH,
@@ -352,6 +388,10 @@ func (m *Model) publish() {
 		coins:          m.player.Coins,
 		shopPrompt:     shopPrompt,
 		interactPrompt: interactPrompt,
+		portalActive:   pActive,
+		portalProgress: pProgress,
+		portalExiting:  pExit,
+		portalColor:    pColor,
 	})
 }
 
@@ -413,6 +453,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.accrueCoins()
 		m.pruneEmotes()
+		// Drive the portal transition: once the entry wipe has covered the
+		// screen, fire EnterPortalMsg; clear a finished exit fade.
+		if m.portal != nil {
+			if m.portal.exiting {
+				if time.Since(m.portal.start).Seconds() >= portalExitDur {
+					m.portal = nil
+				}
+			} else if !m.portal.emitted && time.Since(m.portal.start).Seconds() >= portalEnterDur {
+				m.portal.emitted = true
+				key, name := m.portal.key, m.portal.name
+				m.publish()
+				return m, tea.Batch(animTick(), func() tea.Msg { return EnterPortalMsg{Key: key, Name: name} })
+			}
+		}
 		m.publish()
 		return m, animTick()
 
@@ -990,7 +1044,9 @@ func (m Model) step(dx, dy int, run bool) (Model, tea.Cmd) {
 			m.moving = false
 			m.ticking = false // entering a world ends the walk; let the chain die
 			m.toasts.Show("✦ " + p.Name + " ✦")
-			return m, func() tea.Msg { return EnterPortalMsg{Key: p.Key, Name: p.Name} }
+			// Start the portal wipe; the EnterPortalMsg fires once it has
+			// swallowed the screen (driven by the anim tick).
+			m.portal = &portalFX{key: p.Key, name: p.Name, start: time.Now()}
 		}
 	} else {
 		m.onPortal = false
@@ -1059,6 +1115,12 @@ func (m Model) applyEvent(ev hub.Event) (Model, tea.Cmd) {
 // presence-dependent UI.
 func (m Model) ResumeFromWorld() Model {
 	m.renderer.SetActive(true)
+	// Fade the plaza back in from the portal's colour.
+	key := ""
+	if m.portal != nil {
+		key = m.portal.key
+	}
+	m.portal = &portalFX{key: key, exiting: true, start: time.Now()}
 	// Don't pay out a lump for time spent inside the world; restart the clock.
 	m.lastCoinAt = time.Now()
 	// The player may have just earned a reward cosmetic in there; pick up the

@@ -70,6 +70,11 @@ type frameSnapshot struct {
 	coins          int
 	shopPrompt     bool
 	interactPrompt string
+
+	portalActive   bool
+	portalProgress float64
+	portalExiting  bool
+	portalColor    canvas.Color
 }
 
 // entity is a render-side interpolated avatar.
@@ -259,6 +264,7 @@ func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) strin
 	if snap.chatOpen {
 		r.drawInputBar(snap.chatInput, pw, ph)
 	}
+	r.drawPortalFX(snap, pw, ph)
 	return r.place(left, top)
 }
 
@@ -495,6 +501,36 @@ func (r *Renderer) drawInputBar(line string, pw, ph int) {
 	r.screen.Rect(x, y, bw, canvas.LineH+8, 0xA1A1A1)
 	tx := r.screen.DrawText(x+6, y+4, line, 0xFFFFFF)
 	r.screen.FillRect(tx, y+4, 2, canvas.GlyphH, 0xFFFFFF) // caret
+}
+
+// drawPortalFX overlays the portal transition: a colored 2:1 diamond that
+// swallows the screen on entry (and shrinks back, revealing the plaza, on
+// exit), with a bright glowing rim — matching the iso motif.
+func (r *Renderer) drawPortalFX(snap frameSnapshot, pw, ph int) {
+	if !snap.portalActive {
+		return
+	}
+	col := snap.portalColor
+	rim := col.Lighten(canvas.RGB(140, 140, 150))
+	cx, cy := pw/2, ph/2
+	maxR := pw/2 + ph + 8
+	prog := snap.portalProgress
+	if snap.portalExiting {
+		prog = 1 - prog
+	}
+	rad := int(float64(maxR) * prog)
+	for y := 0; y < ph; y++ {
+		dy2 := abs(y-cy) * 2
+		for x := 0; x < pw; x++ {
+			d := abs(x-cx) + dy2
+			switch {
+			case d <= rad-3:
+				r.screen.Set(x, y, col)
+			case d <= rad:
+				r.screen.Set(x, y, rim) // glowing edge
+			}
+		}
+	}
 }
 
 // place centers the image at the given cell offset and appends the Sixel.

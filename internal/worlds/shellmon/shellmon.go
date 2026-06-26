@@ -77,6 +77,7 @@ func (w *World) Init(ctx world.Context) tea.Model {
 		m.state = stateRoute
 		m.enterRoute()
 	}
+	m.trans.begin(0.55) // wipe in as the portal opens into the world
 	return m
 }
 
@@ -118,6 +119,8 @@ type model struct {
 	foeFX   hpFX
 	anim    battleAnim
 	animSeq int
+
+	trans transition // screen wipe between Shellmon screens
 }
 
 // Init implements tea.Model.
@@ -212,6 +215,7 @@ func (m *model) render() {
 	case stateBattle:
 		m.drawBattle(pw, ph, t)
 	}
+	m.trans.overlay(m.scr, pw, ph)
 	m.ship(left, top)
 }
 

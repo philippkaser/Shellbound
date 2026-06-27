@@ -173,6 +173,14 @@ Enter on a name pre-fills a `/w` to them.
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.
   Connecting the same key twice hands the avatar to the newest session.
+- **Sky & weather.** The plaza runs a shared day/night cycle and weather
+  (`internal/ui/overworld/sky.go`), both derived purely from the wall clock so
+  every session — all one process — sees the same sky with no extra
+  networking. A ~6-minute cycle slides the lighting from bright noon to dim
+  midnight, a sun/moon arcs overhead and stars come out after dark; rain (silver
+  streaks) and snow (drifting flakes) blow through on a shared schedule, and a
+  small label names the time of day. All greyscale — brightness, not hue — so
+  the three colour splashes stay reserved for names, chat and portals.
 - **Emotes.** Gestures (`internal/emote`) broadcast through the hub like chat
   (the sender hears its own echo, so one render path drives self and peers).
   Each plays for a few seconds as a hand-pixelled icon in a callout bubble

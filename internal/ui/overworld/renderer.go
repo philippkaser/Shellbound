@@ -247,22 +247,16 @@ func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) strin
 	originSx := csx - float64(pw)/2
 	originSy := csy - float64(ph)/2
 
-	// Shared day/night + weather, derived from the wall clock.
-	sky := skyAt(now)
-	drawSky(r.screen, pw, ph, t, sky) // celestial body + stars, behind the world
-
 	r.world.RenderIso(r.screen, originSx, originSy, t)
 	for _, p := range plaza.Portals {
 		p.RenderIso(r.screen, t, originSx, originSy)
 	}
 	r.drawPlayers(originSx, originSy, t)
-	r.applyLighting(snap, originSx, originSy, t, pw, ph, sky.ambient)
+	r.applyLighting(snap, originSx, originSy, t, pw, ph)
 	r.world.RenderAmbient(r.screen, originSx, originSy, t)
-	drawWeather(r.screen, pw, ph, t, sky.weather) // precipitation over the scene
 
 	chat.RenderEntries(r.screen, snap.chat, now, 4, ph-3*canvas.LineH, pw*2/3)
 	r.drawHUD(snap, pw, ph)
-	drawSkyLabel(r.screen, pw, sky)
 	r.drawToast(snap, pw)
 	if len(snap.panelLines) > 0 {
 		r.drawPanel(snap.panelLines, pw, ph)
@@ -374,7 +368,7 @@ func drawShadow(c *canvas.Canvas, footX, footY int) {
 	}
 }
 
-func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float64, pw, ph int, ambient float64) {
+func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float64, pw, ph int) {
 	lights := r.lightBuf[:0]
 	if self := r.ents[snap.selfID]; self != nil {
 		sx, sy := iso.Project(self.fx, self.fy)
@@ -422,7 +416,7 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 	}
 	r.lightBuf = lights // retain backing array for reuse next frame
 
-	r.lights.Apply(r.screen, lights, ambient)
+	r.lights.Apply(r.screen, lights, ambientLight)
 
 	// The player carries light (added above) but no glowing disc — only the
 	// lamps flare.

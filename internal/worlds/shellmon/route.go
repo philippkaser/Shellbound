@@ -42,11 +42,12 @@ type npc struct {
 
 // routeState is the walkable field and the player's position on it.
 type routeState struct {
-	w, h   int
-	tiles  []byte
-	px, py int
-	facing sprites.Facing
-	npcs   []npc
+	w, h     int
+	tiles    []byte
+	px, py   int
+	facing   sprites.Facing
+	npcs     []npc
+	lastStep time.Time // for the walk animation
 }
 
 // routeNPCs are the wanderers dotted around the route (placed on open grass).
@@ -171,6 +172,7 @@ func (m *model) keyRoute(key string) bool {
 		return false // trees and rocks block
 	}
 	r.px, r.py = nx, ny
+	r.lastStep = time.Now()
 	if r.tile(nx, ny) == ',' && m.rng.Float64() < encounterRate {
 		m.startWildBattle()
 	}
@@ -284,13 +286,23 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 		case kindRock:
 			drawRock(m.scr, footX, footY)
 		case kindNPC:
+			nbob := int(sinf(t*2.0+float64(it.n.x+it.n.y)) * 1.3) // gentle idle breathing
 			drawContactShadow(m.scr, footX, footY)
-			sprites.Draw(m.scr, footX, footY, it.n.facing, 0, false)
+			sprites.Draw(m.scr, footX, footY+nbob, it.n.facing, 0, false)
 			nameW := canvas.TextWidth(it.n.name)
-			m.scr.DrawTextShadow(footX-nameW/2, footY-sprites.Height-canvas.LineH, it.n.name, 0xB8B8B8, 0x000000)
+			m.scr.DrawTextShadow(footX-nameW/2, footY+nbob-sprites.Height-canvas.LineH, it.n.name, 0xB8B8B8, 0x000000)
 		default:
+			// The player: a two-step walk just after a step, an idle breathing
+			// bob otherwise — matching how the plaza animates the avatar.
+			moving := time.Since(r.lastStep) < 280*time.Millisecond
+			frame, bob := 0, 0
+			if moving {
+				frame = int(t * 10)
+			} else {
+				bob = int(sinf(t*2.5) * 1.3)
+			}
 			drawContactShadow(m.scr, footX, footY)
-			sprites.Draw(m.scr, footX, footY, r.facing, 0, false)
+			sprites.Draw(m.scr, footX, footY+bob, r.facing, frame, moving)
 		}
 	}
 

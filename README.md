@@ -209,13 +209,16 @@ Enter on a name pre-fills a `/w` to them.
   shellmon`): pick one of three starters, roam a walkable wild route, and battle
   with a turn-based **6v6 engine** (`internal/shellmon`) over an original
   18-creature roster across a Spark▸Bramble▸Tide type triangle — catching,
-  leveling and a full Sixel battle screen. The **battle arena** has a scenic
-  backdrop (graded starry sky, drifting clouds, parallax ridges, a glowing
-  horizon and a lit ground) and animated effects (eased HP bars, hit shakes,
-  faint sinks, type-styled cast motes and impact bursts). The **wild route** is
-  drawn in the same 2:1 isometric projection as the plaza — a diamond field of
-  lush swaying grass ringed by a depth-sorted forest, dotted with boulders,
-  flower clusters and a few NPC wanderers you can bump into for a line.
+  leveling and a full Sixel battle screen. The **battle arena** is a stark
+  black-and-white night stage (a near-black starfield, dark ridge silhouettes, a
+  crisp horizon line and a faint pool of ground light), with sparse colour pops
+  in each Shellmon's type hue — the only colour, just like the plaza reserves it
+  for names and portals — on the creature names and the attack effects (eased HP
+  bars, hit shakes, faint sinks, type-styled cast motes and impact bursts). The
+  **wild route** is drawn in the same 2:1 isometric projection as the plaza — a
+  diamond field of lush swaying grass ringed by a depth-sorted forest, dotted
+  with boulders, flower clusters and a few NPC wanderers you can bump into for a
+  line; the avatar and NPCs breathe and the avatar walks, like in the plaza.
   Entering a portal, an encounter, a duel or returning to the route all play a
   diamond-wipe transition (in the portal's own hue for the gateway). The party
   persists as a JSON roster in the per-world save slot, so no schema is

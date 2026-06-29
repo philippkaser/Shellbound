@@ -279,7 +279,7 @@ func (m *pvpModel) draw(pw, ph int, t float64) {
 	if !m.foeFX.gone() {
 		mon.DrawCreature(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, v.Foe.Species)
 	}
-	infoCard(m.scr, 30, 40, 250, v.Foe.Name, v.Foe.Level, m.foeFX.shownHP(), v.Foe.MaxHP, false)
+	infoCard(m.scr, 30, 40, 250, v.Foe.Name, v.Foe.Level, m.foeFX.shownHP(), v.Foe.MaxHP, false, typeColor(v.Foe.Type))
 	teamPips(m.scr, 30, 74, v.FoeTotal, v.FoeAlive)
 
 	// You (lower-left).
@@ -288,7 +288,7 @@ func (m *pvpModel) draw(pw, ph int, t float64) {
 	if !m.youFX.gone() {
 		mon.DrawCreature(m.scr, yx+m.youFX.shakeX(), yy-10+bob+m.youFX.sinkY(), 4, v.You.Species)
 	}
-	infoCard(m.scr, pw-290, ph*52/100, 260, v.You.Name, v.You.Level, m.youFX.shownHP(), v.You.MaxHP, true)
+	infoCard(m.scr, pw-290, ph*52/100, 260, v.You.Name, v.You.Level, m.youFX.shownHP(), v.You.MaxHP, true, typeColor(v.You.Type))
 	teamPips(m.scr, pw-290, ph*52/100+44, len(v.Party), v.YouAlive)
 
 	// Move casts and impact bursts for the current turn.

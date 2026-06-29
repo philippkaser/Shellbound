@@ -6,59 +6,47 @@ import (
 	"github.com/shellbound/shellbound/internal/render/canvas"
 )
 
-// drawArena paints the battle backdrop: a graded sky over distant parallax
-// ridges, drifting clouds, a glowing horizon and a textured ground — so the
-// fight reads as happening in a place rather than on a flat split. Strictly
-// monochrome, lit from above like the rest of Shellbound. t is seconds.
+// drawArena paints the battle backdrop: a stark black-and-white night stage —
+// a near-black starfield sky, dark ridge silhouettes, one crisp bright horizon
+// line and an almost-black ground with a faint pool of light where the
+// combatants stand. Kept high-contrast and colourless so the only colour is the
+// sparse type-hued pops (names, attack effects). t is seconds.
 func drawArena(c *canvas.Canvas, pw, ph int, t float64) {
 	horizon := ph * 52 / 100
 
-	// Sky: dark at the top, brightening toward the horizon (per-row fill).
+	// Sky: black, with only a whisper of lift toward the horizon.
 	for y := 0; y < horizon; y++ {
-		f := float64(y) / float64(horizon)
-		g := uint8(6 + 22*f)
-		c.FillRect(0, y, pw, 1, canvas.RGB(g, g, g+2))
+		g := uint8(3 + 9*float64(y)/float64(horizon))
+		c.FillRect(0, y, pw, 1, canvas.RGB(g, g, g))
 	}
-	// Ground: brightest at the horizon, falling off toward the camera.
+	// Ground: near-black, darkening toward the camera.
 	for y := horizon; y < ph; y++ {
-		f := float64(y-horizon) / float64(ph-horizon)
-		g := uint8(26 - 14*f)
+		g := uint8(16 - 12*float64(y-horizon)/float64(ph-horizon))
 		c.FillRect(0, y, pw, 1, canvas.RGB(g, g, g))
 	}
 
-	// Faint stars, twinkling.
-	for i := 0; i < 40; i++ {
+	// Crisp white stars, twinkling.
+	for i := 0; i < 48; i++ {
 		sx := (i*97 + 13) % pw
-		sy := (i*53 + 7) % (horizon - 20)
-		tw := 0.35 + 0.45*math.Sin(t*2+float64(i)*1.7)
-		if tw > 0.45 {
-			lighten(c, sx, sy, canvas.RGB(200, 200, 210).Scale(tw))
+		sy := (i*53 + 7) % (horizon - 16)
+		tw := 0.4 + 0.5*math.Sin(t*2+float64(i)*1.7)
+		if tw > 0.55 {
+			g := uint8(255 * math.Min(1, tw))
+			c.Set(sx, sy, canvas.RGB(g, g, g))
 		}
 	}
 
-	// A couple of slow drifting clouds.
-	for i, cl := range []struct{ y, w, h, speed, off int }{
-		{horizon - 70, 60, 12, 7, 0}, {horizon - 100, 44, 9, 4, 400}, {horizon - 48, 70, 14, 10, 800},
-	} {
-		cx := (int(t*float64(cl.speed))+cl.off)%(pw+260) - 130
-		_ = i
-		drawCloud(c, cx, cl.y, cl.w, cl.h)
+	// Two ridge silhouettes — dark shapes against the sky, no grey haze.
+	ridge(c, pw, horizon, 44, 0.012, 0.0, canvas.Color(0x141414))
+	ridge(c, pw, horizon, 28, 0.020, 2.1, canvas.Color(0x080808))
+
+	// One crisp, bright horizon line (the brightest thing on the stage).
+	for x := 0; x < pw; x++ {
+		c.Set(x, horizon, canvas.RGB(190, 190, 195))
+		c.Set(x, horizon+1, canvas.RGB(70, 70, 72))
 	}
 
-	// Two parallax ridgelines rising to the horizon.
-	ridge(c, pw, horizon, 46, 0.012, 0.0, canvas.Color(0x1D1D1F))
-	ridge(c, pw, horizon, 30, 0.020, 2.1, canvas.Color(0x141416))
-
-	// Horizon glow — a soft bright band where land meets sky.
-	for dy := -6; dy <= 6; dy++ {
-		k := 1 - math.Abs(float64(dy))/6
-		col := canvas.RGB(120, 120, 130).Scale(0.5 * k)
-		for x := 0; x < pw; x++ {
-			lighten(c, x, horizon+dy, col)
-		}
-	}
-
-	// A broad, faint arena pool of light on the ground where combatants stand.
+	// A faint pool of light on the ground where the combatants stand.
 	softGround(c, pw/2, horizon+(ph-horizon)*55/100, pw*44/100, (ph-horizon)*60/100)
 }
 
@@ -70,17 +58,6 @@ func ridge(c *canvas.Canvas, pw, horizon int, amp, freq, phase float64, tone can
 		h += 0.4 * amp * (0.5 + 0.5*math.Sin(fx*freq*2.7+phase*1.5)) // a little jaggedness
 		ry := horizon - int(h)
 		c.VLine(x, ry, horizon, tone)
-	}
-}
-
-// drawCloud lightens a soft elliptical puff (additive, so it floats over sky).
-func drawCloud(c *canvas.Canvas, cx, cy, rx, ry int) {
-	for dy := -ry; dy <= ry; dy++ {
-		w := int(float64(rx) * sqrtClamp(1-float64(dy*dy)/float64(ry*ry)))
-		for dx := -w; dx <= w; dx++ {
-			edge := 1 - float64(dx*dx)/float64(w*w+1)
-			lighten(c, cx+dx, cy+dy, canvas.RGB(60, 60, 66).Scale(0.5*edge))
-		}
 	}
 }
 

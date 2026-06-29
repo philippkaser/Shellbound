@@ -320,7 +320,7 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	if !m.foeFX.gone() {
 		mon.DrawCreature(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, foe.Species)
 	}
-	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, m.foeFX.shownHP(), foe.MaxHP(), false)
+	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, m.foeFX.shownHP(), foe.MaxHP(), false, typeColor(foe.Type()))
 
 	// Player active (lower-left), bigger, info card lower-right.
 	yx, yy := pw*30/100, ph*72/100
@@ -328,7 +328,7 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	if !m.youFX.gone() {
 		mon.DrawCreature(m.scr, yx+m.youFX.shakeX(), yy-10+bob+m.youFX.sinkY(), 4, you.Species)
 	}
-	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, m.youFX.shownHP(), you.MaxHP(), true)
+	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, m.youFX.shownHP(), you.MaxHP(), true, typeColor(you.Type()))
 
 	// Move casts and impact bursts for the current turn.
 	m.anim.draw(m.scr, yx, yy-10, fx, fy)

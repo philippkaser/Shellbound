@@ -81,14 +81,15 @@ func hpBar(c *canvas.Canvas, x, y, w, cur, max int) {
 }
 
 // infoCard draws a name, level and HP bar in a small box anchored at (x, y).
-// withHP shows the numeric HP under the bar (used for the player side).
-func infoCard(c *canvas.Canvas, x, y, w int, name string, level, cur, max int, withHP bool) {
+// withHP shows the numeric HP under the bar (used for the player side); nameCol
+// tints the name with the creature's type hue (the card's small colour pop).
+func infoCard(c *canvas.Canvas, x, y, w int, name string, level, cur, max int, withHP bool, nameCol canvas.Color) {
 	h := 30
 	if withHP {
 		h = 40
 	}
 	panel(c, x, y, w, h)
-	c.DrawText(x+8, y+6, name, uiText)
+	c.DrawText(x+8, y+6, name, nameCol)
 	lv := "Lv" + itoa(level)
 	c.DrawText(x+w-canvas.TextWidth(lv)-8, y+6, lv, uiDim)
 	hpBar(c, x+8, y+18, w-16, cur, max)

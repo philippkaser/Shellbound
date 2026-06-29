@@ -14,6 +14,22 @@ const (
 	fxMid    = canvas.Color(0xC0C0C0)
 )
 
+// typeColor is a Shellmon type's signature hue — used sparingly as the only
+// colour pops on the otherwise black-and-white battle stage (creature names and
+// attack effects), the same discipline the plaza uses for names and portals.
+func typeColor(t mon.Type) canvas.Color {
+	switch t {
+	case mon.Spark:
+		return canvas.RGB(0xE6, 0xA0, 0x3C) // ember amber
+	case mon.Tide:
+		return canvas.RGB(0x52, 0xA6, 0xE6) // sea blue
+	case mon.Bramble:
+		return canvas.RGB(0x6F, 0xC4, 0x5A) // leaf green
+	default:
+		return canvas.RGB(0xD0, 0xD0, 0xD0) // plain: neutral
+	}
+}
+
 // hpFX eases a combatant's displayed HP toward its true value and tracks hit
 // reactions (shake) and fainting (sink), so bars tick and bodies flinch.
 type hpFX struct {
@@ -118,10 +134,10 @@ func (a *battleAnim) draw(c *canvas.Canvas, youX, youY, foeX, foeY int) {
 	}
 	impact := (el - 0.22) / (animDur - 0.22)
 	if a.youCast && impact >= 0 {
-		drawImpact(c, foeX, foeY, impact)
+		drawImpact(c, foeX, foeY, impact, typeColor(a.youType))
 	}
 	if a.foeCast && impact >= 0 {
-		drawImpact(c, youX, youY, impact)
+		drawImpact(c, youX, youY, impact, typeColor(a.foeType))
 	}
 }
 
@@ -140,56 +156,55 @@ func drawCast(c *canvas.Canvas, fx, fy, tx, ty int, typ mon.Type, prog float64) 
 	}
 }
 
-// castMote draws one particle shaped by elemental type (monochrome, so the
-// shape carries the identity: sparks flicker, droplets fall, leaves dash).
+// castMote draws one particle: a bright white core with a type-coloured trail,
+// shaped by element (sparks flicker, droplets fall, leaves dash).
 func castMote(c *canvas.Canvas, x, y int, typ mon.Type, i int) {
+	col := typeColor(typ)
+	c.Set(x, y, fxBright)
 	switch typ {
 	case mon.Spark:
-		c.Set(x, y, fxBright)
-		c.Set(x+1, y, fxMid)
-		c.Set(x, y-1, fxMid)
+		c.Set(x+1, y, col)
+		c.Set(x, y-1, col)
 	case mon.Tide:
-		c.Set(x, y, fxBright)
-		c.Set(x, y+1, fxMid)
-		c.Set(x, y+2, fxMid)
+		c.Set(x, y+1, col)
+		c.Set(x, y+2, col)
 	case mon.Bramble:
-		c.Set(x, y, fxBright)
-		c.Set(x+1, y-1, fxMid)
-		c.Set(x-1, y+1, fxMid)
+		c.Set(x+1, y-1, col)
+		c.Set(x-1, y+1, col)
 	default:
-		c.Set(x, y, fxBright)
-		c.Set(x+1, y, fxMid)
+		c.Set(x+1, y, col)
 	}
 }
 
 // drawImpact bursts an expanding ring and radial sparks at a hit, fading out.
-func drawImpact(c *canvas.Canvas, cx, cy int, p float64) {
+// The ring carries the move's type colour (the pop); core and sparks stay white.
+func drawImpact(c *canvas.Canvas, cx, cy int, p float64, col canvas.Color) {
 	if p < 0 || p > 1 {
 		return
 	}
 	k := 1 - p
-	// Early core flash.
+	// Early white core flash.
 	if p < 0.25 {
 		r := int(2 + p*36)
 		add(c, cx, cy, r, fxBright.Scale(0.5*(1-p/0.25)))
 	}
-	// Expanding 2:1 ring.
+	// Expanding 2:1 ring, tinted by element.
 	rad := 6 + p*46
 	const steps = 28
 	for s := 0; s < steps; s++ {
 		ang := float64(s) / steps * 2 * math.Pi
 		x := cx + int(math.Cos(ang)*rad)
 		y := cy + int(math.Sin(ang)*rad*0.6)
-		set(c, x, y, fxBright.Scale(0.8*k))
+		set(c, x, y, col.Scale(0.95*k))
 	}
-	// Radial sparks shooting outward.
+	// Radial sparks shooting outward (white core, coloured trail).
 	for i := 0; i < 8; i++ {
 		ang := float64(i)/8*2*math.Pi + 0.4
 		d := rad * (0.5 + 0.5*p)
 		x := cx + int(math.Cos(ang)*d)
 		y := cy + int(math.Sin(ang)*d*0.6)
 		set(c, x, y, fxBright.Scale(k))
-		set(c, x, y-1, fxMid.Scale(k))
+		set(c, x, y-1, col.Scale(0.8*k))
 	}
 }
 

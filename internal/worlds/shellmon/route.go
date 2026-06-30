@@ -431,7 +431,7 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 		case kindRock:
 			drawRock(m.scr, footX, footY)
 		case kindHouse:
-			drawHouse(m.scr, o.px, o.py)
+			drawHouse(m.scr, footX, footY)
 		case kindSign:
 			drawSign(m.scr, footX, footY)
 		case kindItem:
@@ -577,20 +577,74 @@ func drawHealPad(c *canvas.Canvas, px, py int) {
 	c.FillRect(cx-4, cy-1, 9, 3, canvas.Color(0xE6E6E6))
 }
 
-// drawHouse paints a small blocky town house whose ground-diamond top vertex is
-// at (vx, vy): top-lit walls, a flat roof, a door and a window.
-func drawHouse(c *canvas.Canvas, vx, vy int) {
-	const wallH = 26
-	iso.DrawCube(c, vx, vy, wallH, canvas.Color(0xA6A6A6), canvas.Color(0x5E5E5E), canvas.Color(0x808080))
-	// Roof catch-light: a brighter rim on the top diamond's near edges.
-	iso.DrawDiamond(c, vx, vy-wallH, canvas.Color(0xBEBEBE), canvas.Color(0x6E6E6E))
-	baseY := vy + iso.TileH
-	// Door on the front, centered low.
-	c.FillRect(vx-2, baseY-13, 5, 11, canvas.Color(0x2C2C2C))
-	c.Set(vx+1, baseY-8, canvas.Color(0xC0C0C0)) // knob
-	// A small window on each face.
-	c.FillRect(vx-9, vy+iso.HH-4, 3, 3, canvas.Color(0xD0D0D0))
-	c.FillRect(vx+7, vy+iso.HH-4, 3, 3, canvas.Color(0xD0D0D0))
+// drawHouse paints a camera-facing cottage standing on the ground point
+// (footX, footY): a gabled roof over a flat front wall, with a centered door
+// and two windows. Like the trees and avatar it is a billboard, so the door and
+// windows read straight-on instead of warping across an isometric corner.
+func drawHouse(c *canvas.Canvas, footX, footY int) {
+	const (
+		wallHalf = 20 // wall half-width
+		wallH    = 30 // wall height
+		eaveHalf = 25 // roof overhang half-width
+		roofH    = 16 // roof peak height above the wall top
+	)
+	wallTop := footY - wallH
+	roofTop := wallTop - roofH
+
+	// Soft ground shadow so it sits on the tile.
+	for dy := -3; dy <= 3; dy++ {
+		w := int(float64(wallHalf+2) * sqrtClamp(1-float64(dy*dy)/9.0))
+		yy := footY + dy - 1
+		for dx := -w; dx <= w; dx++ {
+			c.Set(footX+dx, yy, c.At(footX+dx, yy).Scale(0.55))
+		}
+	}
+
+	// Front wall: top-lit, a touch darker toward the left edge.
+	for y := wallTop; y < footY; y++ {
+		for dx := -wallHalf; dx <= wallHalf; dx++ {
+			tone := canvas.Color(0x969696)
+			if dx < -wallHalf/2 {
+				tone = canvas.Color(0x787878) // shaded left return
+			}
+			if y >= footY-3 {
+				tone = tone.Scale(0.7) // grounding shadow at the base
+			}
+			c.Set(footX+dx, y, tone)
+		}
+	}
+
+	// Gabled roof: a filled triangle from the eaves up to the peak, brightest
+	// on top where the light lands.
+	for y := roofTop; y <= wallTop; y++ {
+		f := float64(y-roofTop) / float64(roofH) // 0 at peak, 1 at eaves
+		half := int(float64(eaveHalf) * f)
+		tone := canvas.Color(0xC4C4C4)
+		if y > roofTop+roofH/2 {
+			tone = canvas.Color(0xA0A0A0) // lower roof in shade
+		}
+		for dx := -half; dx <= half; dx++ {
+			c.Set(footX+dx, y, tone)
+		}
+	}
+	// Eave line and ridge highlight.
+	c.HLine(footX-eaveHalf, footX+eaveHalf, wallTop, canvas.Color(0x4E4E4E))
+	c.Set(footX, roofTop, canvas.Color(0xE2E2E2))
+
+	// Door: centered, set into the wall, with a knob.
+	const doorHalf, doorH = 5, 15
+	c.FillRect(footX-doorHalf, footY-doorH, doorHalf*2+1, doorH, canvas.Color(0x2A2421))
+	c.Rect(footX-doorHalf, footY-doorH, doorHalf*2+1, doorH, canvas.Color(0x161210))
+	c.Set(footX+doorHalf-2, footY-doorH/2, canvas.Color(0xD8D8D8)) // knob
+
+	// Two lit windows flanking the door, with a cross frame.
+	for _, wx := range []int{-12, 12} {
+		wy := wallTop + 9
+		c.FillRect(footX+wx-3, wy-3, 7, 7, canvas.Color(0xDADADA))
+		c.Rect(footX+wx-3, wy-3, 7, 7, canvas.Color(0x3A3A3A))
+		c.VLine(footX+wx, wy-3, wy+3, canvas.Color(0x3A3A3A))
+		c.HLine(footX+wx-3, footX+wx+3, wy, canvas.Color(0x3A3A3A))
+	}
 }
 
 // drawSign paints a small wooden signpost.

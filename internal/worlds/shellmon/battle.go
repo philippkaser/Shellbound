@@ -30,20 +30,27 @@ type battleUI struct {
 	log    []string
 	result string // outcome shown on the subOver screen
 	won    bool
+
+	// trainer battles (empty for wild encounters)
+	trainerID   string
+	trainerName string
+	reward      string // cosmetic key granted on first defeat
+	rewardN     string // its display name
 }
 
-// beginBattle opens a battle of the player's roster against one opponent.
-func (m *model) beginBattle(foe *mon.Creature, wild bool) {
+// beginBattle opens a battle of the player's roster against an opponent team
+// (a single creature for wild encounters, a full team for trainers).
+func (m *model) beginBattle(team []*mon.Creature, wild bool, opp string) {
 	bt := &battleUI{
-		b:    mon.NewBattle(m.roster, []*mon.Creature{foe}, m.rng),
+		b:    mon.NewBattle(m.roster, team, m.rng),
 		wild: wild,
 		sub:  subMenu,
 	}
-	verb := "A wild " + foe.Name() + " appeared!"
-	if !wild {
-		verb = foe.Name() + " challenges you!"
+	if wild {
+		bt.log = []string{"A wild " + team[0].Name() + " appeared!"}
+	} else {
+		bt.log = []string{opp + " sent out " + team[0].Name() + "!"}
 	}
-	bt.log = []string{verb}
 	m.bt = bt
 	m.youFX, m.foeFX, m.anim, m.animSeq = hpFX{}, hpFX{}, battleAnim{}, 0
 	m.trans.begin(0.5) // encounter wipe
@@ -239,6 +246,14 @@ func (m *model) afterTurn() {
 			bt.won = true
 			bt.result = "You won the battle!"
 			m.awardXP()
+			if !bt.wild && bt.trainerID != "" && !m.defeated[bt.trainerID] {
+				m.defeated[bt.trainerID] = true
+				bt.result = bt.trainerName + " was defeated!"
+				if bt.reward != "" && m.ctx.Inventory != nil {
+					_ = m.ctx.Inventory.Grant("cosmetic."+bt.reward, bt.rewardN, 1)
+					bt.log = appendLog(bt.log, "Received "+bt.rewardN+"! (wear it in the plaza)")
+				}
+			}
 		} else {
 			bt.won = false
 			bt.result = "Your team was overwhelmed…"

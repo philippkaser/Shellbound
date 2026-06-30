@@ -10,26 +10,8 @@ import (
 	mon "github.com/shellbound/shellbound/internal/shellmon"
 )
 
-// Route tuning.
-const (
-	encounterRate = 0.16 // chance per step into tall grass
-	routeLevelMin = 3
-	routeLevelMax = 8
-)
-
-// The wild route layout. '#' trees (block), ',' tall grass (encounters),
-// '.' trodden path, 's' the entrance. The border is forced to trees.
-const routeLayout = `###################
-#,,,..,,,,..,,,..,#
-#,,,,,#,,,,#,,,,,,#
-#,..,,,,..,,,,..,,#
-#,,,,,,,#,,,#,,,,,#
-#..,,,..,,,,,..,,.#
-#,,,#,,,,..,,,,#,,#
-#,,,,,..,,,#,,,,,,#
-#,..,,,,,,,,,,..,,#
-#,,,,...,s,...,,,,#
-###################`
+// encounterRate is the chance per step into tall grass of a wild battle.
+const encounterRate = 0.16
 
 // npc is a non-player character standing on the route, with a flavor line shown
 // when the player bumps into them.
@@ -40,76 +22,42 @@ type npc struct {
 	facing sprites.Facing
 }
 
-// routeState is the walkable field and the player's position on it.
+// routeState is one walkable area (a town or route): its tiles, the player's
+// position, and the entities/links/secrets placed on it.
 type routeState struct {
-	w, h     int
-	tiles    []byte
-	px, py   int
-	facing   sprites.Facing
+	key, name string
+	w, h      int
+	tiles     []byte
+	px, py    int
+	facing    sprites.Facing
+	lastStep  time.Time // for the walk animation
+
 	npcs     []npc
-	lastStep time.Time // for the walk animation
+	trainers []trainer
+	signs    []sign
+	warps    []warp
+	items    []hiddenItem
+
+	encounters     bool
+	lvlMin, lvlMax int
+	wildPool       []string
+	rareSpecies    string
+	rareLevel      int
+	rareChance     float64
+	spawnX, spawnY int
 }
 
-// routeNPCs are the wanderers dotted around the route (placed on open grass).
-var routeNPCs = []npc{
-	{x: 4, y: 3, name: "Hiker Bram", line: "The tall grass is thick with wild Shellmon — wade in!", facing: sprites.FaceRight},
-	{x: 14, y: 4, name: "Ranger Mossa", line: "Spark singes Bramble, Bramble drinks Tide, Tide douses Spark.", facing: sprites.FaceLeft},
-	{x: 9, y: 7, name: "Kid Pip", line: "A wild Gulper ate my sandwich once. Worth it.", facing: sprites.FaceUp},
-}
-
-// enterRoute (re)builds the route and places the player at the entrance.
-func (m *model) enterRoute() {
-	lines := splitLines(routeLayout)
-	h := len(lines)
-	w := 0
-	for _, l := range lines {
-		if len(l) > w {
-			w = len(l)
-		}
+// enterArea builds an area and places the player at (x, y), or the area's
+// default spawn when x < 0. It plays the diamond wipe to cover the swap.
+func (m *model) enterArea(key string, x, y int) {
+	a := buildArea(key)
+	if x < 0 {
+		x, y = a.spawnX, a.spawnY
 	}
-	r := &routeState{w: w, h: h, tiles: make([]byte, w*h), facing: sprites.FaceDown}
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			t := byte(',')
-			if x < len(lines[y]) {
-				t = lines[y][x]
-			}
-			if x == 0 || y == 0 || x == w-1 || y == h-1 {
-				t = '#'
-			}
-			if t == 's' {
-				r.px, r.py = x, y
-				t = '.'
-			}
-			r.tiles[y*w+x] = t
-		}
-	}
-	// Sprinkle scenery onto open grass: occasional rocks (block) and flower
-	// clusters (decorative), placed deterministically and kept off the entrance.
-	for y := 1; y < h-1; y++ {
-		for x := 1; x < w-1; x++ {
-			if r.tiles[y*w+x] != ',' {
-				continue
-			}
-			if iabs(x-r.px) <= 1 && iabs(y-r.py) <= 1 {
-				continue
-			}
-			switch {
-			case (x*7+y*5)%23 == 0:
-				r.tiles[y*w+x] = 'o' // rock
-			case (x*5+y*9)%19 == 0:
-				r.tiles[y*w+x] = 'f' // flowers
-			}
-		}
-	}
-	r.npcs = append([]npc(nil), routeNPCs...)
-	for _, n := range r.npcs {
-		if n.x > 0 && n.y > 0 && n.x < w-1 && n.y < h-1 {
-			r.tiles[n.y*w+n.x] = '.' // stand on clear ground
-		}
-	}
-	m.route = r
+	a.px, a.py = x, y
+	m.route = a
 	m.state = stateRoute
+	m.trans.begin(0.4)
 }
 
 func (r *routeState) tile(x, y int) byte {
@@ -129,18 +77,57 @@ func (r *routeState) npcAt(x, y int) *npc {
 	return nil
 }
 
-// blocks reports whether a cell stops movement (trees, rocks, NPCs).
-func (r *routeState) blocks(x, y int) bool {
-	switch r.tile(x, y) {
-	case '#', 'o':
-		return true
+// trainerAt returns the trainer standing on a cell, if any.
+func (r *routeState) trainerAt(x, y int) *trainer {
+	for i := range r.trainers {
+		if r.trainers[i].x == x && r.trainers[i].y == y {
+			return &r.trainers[i]
+		}
 	}
-	return r.npcAt(x, y) != nil
+	return nil
 }
 
-// keyRoute handles route input; returns true to leave the world.
+// signAt returns the sign at a cell, if any.
+func (r *routeState) signAt(x, y int) *sign {
+	for i := range r.signs {
+		if r.signs[i].x == x && r.signs[i].y == y {
+			return &r.signs[i]
+		}
+	}
+	return nil
+}
+
+// warpAt returns the warp on a cell, if any.
+func (r *routeState) warpAt(x, y int) *warp {
+	for i := range r.warps {
+		if r.warps[i].x == x && r.warps[i].y == y {
+			return &r.warps[i]
+		}
+	}
+	return nil
+}
+
+// blocks reports whether a cell stops movement (trees, rocks, water, buildings,
+// and standing NPCs/trainers/signs).
+func (r *routeState) blocks(x, y int) bool {
+	switch r.tile(x, y) {
+	case '#', 'o', '~', 'B':
+		return true
+	}
+	return r.npcAt(x, y) != nil || r.trainerAt(x, y) != nil || r.signAt(x, y) != nil
+}
+
+// keyRoute handles overworld input; returns true to leave the world.
 func (m *model) keyRoute(key string) bool {
 	r := m.route
+	switch key {
+	case "p":
+		m.partyCur = 0
+		m.state = stateParty
+		return false
+	case "esc", "q":
+		return true
+	}
 	dx, dy := 0, 0
 	switch key {
 	case "up", "w":
@@ -151,12 +138,6 @@ func (m *model) keyRoute(key string) bool {
 		dx, r.facing = -1, sprites.FaceLeft
 	case "right", "d":
 		dx, r.facing = 1, sprites.FaceRight
-	case "p":
-		m.partyCur = 0
-		m.state = stateParty
-		return false
-	case "esc", "q":
-		return true
 	default:
 		return false
 	}
@@ -164,28 +145,159 @@ func (m *model) keyRoute(key string) bool {
 		return false
 	}
 	nx, ny := r.px+dx, r.py+dy
+
+	// Facing into a person or sign talks to them (no step).
 	if n := r.npcAt(nx, ny); n != nil {
-		m.routeMsg, m.routeMsgAt = n.name+": "+n.line, time.Now()
-		return false // bump into the NPC: chat, don't move
+		m.say(n.name + ": " + n.line)
+		return false
+	}
+	if tr := r.trainerAt(nx, ny); tr != nil {
+		if m.defeated[tr.id] {
+			m.say(tr.name + ": " + tr.defeat)
+		} else {
+			m.beginTrainer(tr)
+		}
+		return false
+	}
+	if s := r.signAt(nx, ny); s != nil {
+		m.say(s.text)
+		return false
 	}
 	if r.blocks(nx, ny) {
-		return false // trees and rocks block
+		return false
 	}
+
+	// Step, then resolve what we walked onto.
 	r.px, r.py = nx, ny
 	r.lastStep = time.Now()
-	if r.tile(nx, ny) == ',' && m.rng.Float64() < encounterRate {
+
+	if w := r.warpAt(nx, ny); w != nil {
+		m.enterArea(w.dest, w.dx, w.dy)
+		return false
+	}
+	if r.tile(nx, ny) == 'H' {
+		m.healParty()
+		m.say("Your team was fully healed!")
+		return false
+	}
+	if it := r.itemAt(nx, ny); it != nil && !m.found[it.id] {
+		m.collect(it)
+		return false
+	}
+	if r.encounters && r.tile(nx, ny) == ',' && m.rng.Float64() < encounterRate {
 		m.startWildBattle()
+		return false
+	}
+	// A trainer may notice you from down their line of sight.
+	if tr := m.spotter(); tr != nil {
+		m.say(tr.name + " spotted you!")
+		m.beginTrainer(tr)
 	}
 	return false
 }
 
-// startWildBattle rolls a random wild Shellmon and opens the battle.
+// say shows a transient line in the overworld speech panel.
+func (m *model) say(text string) { m.routeMsg, m.routeMsgAt = text, time.Now() }
+
+// itemAt returns the pickup on a cell, if any.
+func (r *routeState) itemAt(x, y int) *hiddenItem {
+	for i := range r.items {
+		if r.items[i].x == x && r.items[i].y == y {
+			return &r.items[i]
+		}
+	}
+	return nil
+}
+
+// spotter returns the first undefeated trainer whose line of sight reaches the
+// player (clear of obstacles), or nil.
+func (m *model) spotter() *trainer {
+	r := m.route
+	for i := range r.trainers {
+		tr := &r.trainers[i]
+		if m.defeated[tr.id] {
+			continue
+		}
+		vx, vy := facingVec(tr.facing)
+		for d := 1; d <= tr.sight; d++ {
+			cx, cy := tr.x+vx*d, tr.y+vy*d
+			if cx == r.px && cy == r.py {
+				return tr
+			}
+			if r.blocks(cx, cy) {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func facingVec(f sprites.Facing) (int, int) {
+	switch f {
+	case sprites.FaceUp:
+		return 0, -1
+	case sprites.FaceLeft:
+		return -1, 0
+	case sprites.FaceRight:
+		return 1, 0
+	default:
+		return 0, 1
+	}
+}
+
+// beginTrainer opens a battle against a trainer's freshly built team.
+func (m *model) beginTrainer(tr *trainer) {
+	var team []*mon.Creature
+	for _, tm := range tr.team {
+		if c := mon.NewCreature(tm.key, tm.lvl); c != nil {
+			team = append(team, c)
+		}
+	}
+	if len(team) == 0 {
+		return
+	}
+	m.beginBattle(team, false, tr.name)
+	m.bt.trainerID, m.bt.trainerName = tr.id, tr.name
+	m.bt.reward, m.bt.rewardN = tr.reward, tr.rewardN
+	m.bt.log = []string{tr.name + ": " + tr.intro, m.bt.log[0]}
+}
+
+// collect grants a pickup's contents once and marks it found.
+func (m *model) collect(it *hiddenItem) {
+	m.found[it.id] = true
+	if it.creature != "" {
+		if len(m.roster) < maxParty {
+			m.roster = append(m.roster, mon.NewCreature(it.creature, it.level))
+			m.say(it.msg)
+		} else {
+			m.say("You found a Shellmon, but your team is full!")
+		}
+	}
+	if it.cosmetic != "" && m.ctx.Inventory != nil {
+		_ = m.ctx.Inventory.Grant("cosmetic."+it.cosmetic, it.cosmeticName, 1)
+		m.say(it.msg + " (wear it with c in the plaza)")
+	}
+	m.saveRoster()
+}
+
+// startWildBattle rolls a wild Shellmon from the area's pool (with a small
+// chance of its rare species) and opens the battle.
 func (m *model) startWildBattle() {
-	all := mon.All()
-	sp := all[m.rng.Intn(len(all))]
-	level := routeLevelMin + m.rng.Intn(routeLevelMax-routeLevelMin+1)
-	wild := mon.NewCreature(sp.Key, level)
-	m.beginBattle(wild, true)
+	r := m.route
+	pool := r.wildPool
+	if len(pool) == 0 {
+		return
+	}
+	sp := pool[m.rng.Intn(len(pool))]
+	span := r.lvlMax - r.lvlMin + 1
+	if span < 1 {
+		span = 1
+	}
+	lvl := r.lvlMin + m.rng.Intn(span)
+	if r.rareSpecies != "" && m.rng.Float64() < r.rareChance {
+		sp, lvl = r.rareSpecies, r.rareLevel
+	}
+	m.beginBattle([]*mon.Creature{mon.NewCreature(sp, lvl)}, true, "")
 }
 
 // Route ground tones (monochrome, lit like the plaza floor).
@@ -196,6 +308,28 @@ const (
 	routeGrass = canvas.Color(0x161616)
 	routeGrasB = canvas.Color(0x1B1B1B)
 )
+
+// tall objects sorted back-to-front each frame.
+const (
+	kindPlayer = iota
+	kindTree
+	kindRock
+	kindHouse
+	kindSign
+	kindNPC
+	kindTrainer
+	kindItem
+)
+
+type tallObj struct {
+	depth  int
+	kind   int
+	px, py int
+	n      *npc
+	tr     *trainer
+	sg     *sign
+	it     *hiddenItem
+}
 
 func (m *model) drawRoute(pw, ph int, t float64) {
 	r := m.route
@@ -208,49 +342,42 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 		return int(sx - originSx), int(sy - originSy)
 	}
 
-	// Ground plane: a paved diamond per cell (grass tiles a touch darker, the
-	// trodden path paler), drawn flat so order doesn't matter.
+	// Ground plane (flat): paved path, grass, water and heal pads.
 	for y := 0; y < r.h; y++ {
 		for x := 0; x < r.w; x++ {
 			px, py := project(x, y)
 			if px < -iso.TileW || px > pw+iso.TileW || py < -iso.TileH || py > ph+iso.TileH {
 				continue
 			}
-			tile := r.tile(x, y)
-			grass := tile == ',' || tile == 'f'
-			fill := routePath
-			if grass {
-				fill = routeGrass
-				if (x+y)&1 == 0 {
-					fill = routeGrasB
-				}
-			} else if (x+y)&1 == 0 {
-				fill = routePathB
-			}
-			iso.DrawDiamond(m.scr, px, py, fill, routeEdge)
-			switch tile {
+			switch r.tile(x, y) {
 			case ',':
+				groundGrass(m.scr, px, py, x, y)
 				drawTallGrass(m.scr, px, py+iso.HH, x, y, t)
 			case 'f':
+				groundGrass(m.scr, px, py, x, y)
 				drawFlowers(m.scr, px, py+iso.HH, x, y, t)
+			case '~':
+				drawWaterTile(m.scr, px, py, x, y, t)
+			case 'H':
+				drawHealPad(m.scr, px, py)
+			default: // '.', '#', 'o', 'B' all sit on paved ground
+				fill := routePath
+				if (x+y)&1 == 0 {
+					fill = routePathB
+				}
+				iso.DrawDiamond(m.scr, px, py, fill, routeEdge)
 			}
 		}
 	}
 
-	// Tall things (trees, rocks, NPCs and the player) drawn back-to-front.
-	const (
-		kindPlayer = iota
-		kindTree
-		kindRock
-		kindNPC
-	)
-	type tall struct {
-		depth  int
-		kind   int
-		px, py int
-		n      *npc
+	// Collect every tall object, depth-sort, and draw back-to-front.
+	var objs []tallObj
+	add := func(o tallObj) {
+		if o.px < -80 || o.px > pw+80 || o.py < -100 || o.py > ph+100 {
+			return
+		}
+		objs = append(objs, o)
 	}
-	var items []tall
 	for y := 0; y < r.h; y++ {
 		for x := 0; x < r.w; x++ {
 			k := -1
@@ -259,41 +386,73 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				k = kindTree
 			case 'o':
 				k = kindRock
+			case 'B':
+				k = kindHouse
 			}
 			if k < 0 {
 				continue
 			}
 			px, py := project(x, y)
-			if px < -60 || px > pw+60 || py < -80 || py > ph+80 {
-				continue
-			}
-			items = append(items, tall{depth: iso.Depth(x, y), kind: k, px: px, py: py})
+			add(tallObj{depth: iso.Depth(x, y), kind: k, px: px, py: py})
 		}
+	}
+	for i := range r.signs {
+		s := &r.signs[i]
+		px, py := project(s.x, s.y)
+		add(tallObj{depth: iso.Depth(s.x, s.y), kind: kindSign, px: px, py: py, sg: s})
 	}
 	for i := range r.npcs {
 		n := &r.npcs[i]
 		px, py := project(n.x, n.y)
-		items = append(items, tall{depth: iso.Depth(n.x, n.y), kind: kindNPC, px: px, py: py, n: n})
+		add(tallObj{depth: iso.Depth(n.x, n.y), kind: kindNPC, px: px, py: py, n: n})
+	}
+	for i := range r.trainers {
+		tr := &r.trainers[i]
+		px, py := project(tr.x, tr.y)
+		add(tallObj{depth: iso.Depth(tr.x, tr.y), kind: kindTrainer, px: px, py: py, tr: tr})
+	}
+	for i := range r.items {
+		it := &r.items[i]
+		if !it.visible || m.found[it.id] {
+			continue
+		}
+		px, py := project(it.x, it.y)
+		add(tallObj{depth: iso.Depth(it.x, it.y), kind: kindItem, px: px, py: py, it: it})
 	}
 	ppx, ppy := project(r.px, r.py)
-	items = append(items, tall{depth: iso.Depth(r.px, r.py), kind: kindPlayer, px: ppx, py: ppy})
-	sort.Slice(items, func(i, j int) bool { return items[i].depth < items[j].depth })
-	for _, it := range items {
-		footX, footY := it.px, it.py+iso.HH
-		switch it.kind {
+	add(tallObj{depth: iso.Depth(r.px, r.py), kind: kindPlayer, px: ppx, py: ppy})
+
+	sort.Slice(objs, func(i, j int) bool { return objs[i].depth < objs[j].depth })
+	for _, o := range objs {
+		footX, footY := o.px, o.py+iso.HH
+		switch o.kind {
 		case kindTree:
-			drawIsoTree(m.scr, footX, footY, it.px*3+it.py)
+			drawIsoTree(m.scr, footX, footY, o.px*3+o.py)
 		case kindRock:
 			drawRock(m.scr, footX, footY)
+		case kindHouse:
+			drawHouse(m.scr, o.px, o.py)
+		case kindSign:
+			drawSign(m.scr, footX, footY)
+		case kindItem:
+			drawItemBall(m.scr, footX, footY, t)
 		case kindNPC:
-			_, nbob := sprites.Pose(t, false, float64(it.n.x+it.n.y)) // gentle idle breathing
+			_, nbob := sprites.Pose(t, false, float64(o.n.x+o.n.y))
 			drawContactShadow(m.scr, footX, footY)
-			sprites.Draw(m.scr, footX, footY+nbob, it.n.facing, 0, false)
-			nameW := canvas.TextWidth(it.n.name)
-			m.scr.DrawTextShadow(footX-nameW/2, footY+nbob-sprites.Height-canvas.LineH, it.n.name, 0xB8B8B8, 0x000000)
+			sprites.Draw(m.scr, footX, footY+nbob, o.n.facing, 0, false)
+			drawNameTag(m.scr, footX, footY+nbob, o.n.name, 0xB8B8B8)
+		case kindTrainer:
+			_, nbob := sprites.Pose(t, false, float64(o.tr.x*2+o.tr.y))
+			drawContactShadow(m.scr, footX, footY)
+			sprites.Draw(m.scr, footX, footY+nbob, o.tr.facing, 0, false)
+			name := o.tr.name
+			col := canvas.Color(0xE0E0E0)
+			if m.defeated[o.tr.id] {
+				name, col = name+" (beaten)", 0x707070
+			}
+			drawNameTag(m.scr, footX, footY+nbob, name, col)
 		default:
-			// The player animates exactly like the plaza avatar (shared
-			// sprites.Pose): a walk just after a step, an idle bob otherwise.
+			// The player animates like the plaza avatar (shared sprites.Pose).
 			moving := time.Since(r.lastStep) < 280*time.Millisecond
 			frame, bob := sprites.Pose(t, moving, 0)
 			drawContactShadow(m.scr, footX, footY)
@@ -301,24 +460,37 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 		}
 	}
 
-	// HUD.
-	panel(m.scr, 16, 14, 200, 24)
-	m.scr.DrawText(26, 22, "Wild Route", uiText)
+	// HUD: area name + lead Shellmon + controls.
+	panel(m.scr, 16, 14, 220, 24)
+	m.scr.DrawText(26, 22, r.name, uiText)
 	lead := ""
 	if len(m.roster) > 0 {
 		lead = m.roster[0].Name() + " Lv" + itoa(m.roster[0].Level)
 	}
 	m.scr.DrawText(pw-canvas.TextWidth(lead)-20, 22, lead, uiDim)
-	hint := "WASD walk · search the grass · p team · esc leave"
+	hint := "WASD walk · talk by facing · p team · esc leave"
 	m.scr.DrawText(pw/2-canvas.TextWidth(hint)/2, ph-26, hint, uiDim)
 
-	// A recently bumped NPC's line, in a speech panel near the bottom.
+	// Speech / event line.
 	if m.routeMsg != "" && time.Since(m.routeMsgAt) < 4*time.Second {
 		w := canvas.TextWidth(m.routeMsg) + 24
 		x := pw/2 - w/2
 		panel(m.scr, x, ph-64, w, 26)
 		m.scr.DrawText(x+12, ph-56, m.routeMsg, uiText)
 	}
+}
+
+func drawNameTag(c *canvas.Canvas, footX, footY int, name string, col canvas.Color) {
+	w := canvas.TextWidth(name)
+	c.DrawTextShadow(footX-w/2, footY-sprites.Height-canvas.LineH, name, col, 0x000000)
+}
+
+func groundGrass(c *canvas.Canvas, px, py, x, y int) {
+	fill := routeGrass
+	if (x+y)&1 == 0 {
+		fill = routeGrasB
+	}
+	iso.DrawDiamond(c, px, py, fill, routeEdge)
 }
 
 // --- isometric route art (monochrome, top-lit like the plaza) ---
@@ -387,6 +559,67 @@ func drawRock(c *canvas.Canvas, baseX, baseY int) {
 	c.Set(baseX+1, baseY-7, canvas.Color(0x4A4A4A))
 }
 
+// drawWaterTile paints a shimmering pond diamond.
+func drawWaterTile(c *canvas.Canvas, px, py, x, y int, t float64) {
+	shade := 0.5 + 0.4*sinf(float64(x*5+y*7)+t*2.2)
+	g := uint8(26 + 32*shade)
+	iso.DrawDiamond(c, px, py, canvas.RGB(g, g, g+10), canvas.Color(0x0E0E16))
+	if shade > 0.78 { // a drifting glint
+		c.Set(px, py+iso.HH-2, canvas.Color(0xC8C8E0))
+	}
+}
+
+// drawHealPad paints the well/rest pad: a pale diamond with a bright cross.
+func drawHealPad(c *canvas.Canvas, px, py int) {
+	iso.DrawDiamond(c, px, py, canvas.Color(0x2E2E2E), canvas.Color(0x565656))
+	cx, cy := px, py+iso.HH
+	c.FillRect(cx-1, cy-4, 3, 9, canvas.Color(0xE6E6E6))
+	c.FillRect(cx-4, cy-1, 9, 3, canvas.Color(0xE6E6E6))
+}
+
+// drawHouse paints a small blocky town house whose ground-diamond top vertex is
+// at (vx, vy): top-lit walls, a flat roof, a door and a window.
+func drawHouse(c *canvas.Canvas, vx, vy int) {
+	const wallH = 26
+	iso.DrawCube(c, vx, vy, wallH, canvas.Color(0xA6A6A6), canvas.Color(0x5E5E5E), canvas.Color(0x808080))
+	// Roof catch-light: a brighter rim on the top diamond's near edges.
+	iso.DrawDiamond(c, vx, vy-wallH, canvas.Color(0xBEBEBE), canvas.Color(0x6E6E6E))
+	baseY := vy + iso.TileH
+	// Door on the front, centered low.
+	c.FillRect(vx-2, baseY-13, 5, 11, canvas.Color(0x2C2C2C))
+	c.Set(vx+1, baseY-8, canvas.Color(0xC0C0C0)) // knob
+	// A small window on each face.
+	c.FillRect(vx-9, vy+iso.HH-4, 3, 3, canvas.Color(0xD0D0D0))
+	c.FillRect(vx+7, vy+iso.HH-4, 3, 3, canvas.Color(0xD0D0D0))
+}
+
+// drawSign paints a small wooden signpost.
+func drawSign(c *canvas.Canvas, footX, footY int) {
+	c.FillRect(footX-1, footY-13, 2, 13, canvas.Color(0x554636))  // post
+	c.FillRect(footX-7, footY-22, 15, 10, canvas.Color(0x8A7654)) // board
+	c.Rect(footX-7, footY-22, 15, 10, canvas.Color(0x3C3026))
+	c.HLine(footX-4, footX+4, footY-18, canvas.Color(0x3C3026)) // "text"
+	c.HLine(footX-4, footX+2, footY-15, canvas.Color(0x3C3026))
+}
+
+// drawItemBall paints a small bobbing pickup sphere with a band and glint.
+func drawItemBall(c *canvas.Canvas, footX, footY int, t float64) {
+	cy := footY - 6 + int(sinf(t*3)*1.5)
+	for dy := -5; dy <= 5; dy++ {
+		w := int(5 * sqrtClamp(1-float64(dy*dy)/25.0))
+		tone := canvas.Color(0xD2D2D2)
+		if dy > 1 {
+			tone = canvas.Color(0x808080)
+		}
+		for dx := -w; dx <= w; dx++ {
+			c.Set(footX+dx, cy+dy, tone)
+		}
+	}
+	c.HLine(footX-5, footX+5, cy, canvas.Color(0x2E2E2E)) // band
+	c.Set(footX, cy, canvas.Color(0xF4F4F4))              // button
+	c.Set(footX-2, cy-3, canvas.Color(0xFFFFFF))          // glint
+}
+
 // drawIsoTree draws a tree rising from the ground point (baseX, baseY): a trunk
 // and a top-lit canopy, with a soft ground shadow.
 func drawIsoTree(c *canvas.Canvas, baseX, baseY, seed int) {
@@ -434,19 +667,4 @@ func drawContactShadow(c *canvas.Canvas, footX, footY int) {
 			c.Set(footX+dx, yy, c.At(footX+dx, yy).Scale(0.5))
 		}
 	}
-}
-
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
 }

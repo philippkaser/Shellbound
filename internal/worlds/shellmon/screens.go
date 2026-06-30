@@ -23,8 +23,7 @@ func (m *model) keyStarter(key string) bool {
 		sp := m.starters[m.starterCursor]
 		m.roster = append(m.roster, mon.NewCreature(sp.Key, 5))
 		m.saveRoster()
-		m.state = stateRoute
-		m.enterRoute()
+		m.enterArea(startArea, -1, -1)
 	case "esc", "q":
 		return true
 	}

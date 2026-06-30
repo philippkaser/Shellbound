@@ -206,8 +206,19 @@ Enter on a name pre-fills a `/w` to them.
   *Hellbreaker Horns* for clearing the hall. Both paint their accents in the
   portal's own colour, so a world and its gateway look like one place. The
   **Shellmon** portal leads to a **creature collector** (`internal/worlds/
-  shellmon`): pick one of three starters, roam a walkable wild route, and battle
-  with a turn-based **6v6 engine** (`internal/shellmon`) over an original
+  shellmon`): pick one of three starters, then set out across a little
+  **overworld** — the starting town of **Oakhaven**, **Route 1**, and the
+  seaside town of **Tidewell** at the far end — linked by edge warps. Towns have
+  houses, a rest/heal well-pad (the cross), signs to read and NPCs to bump for a
+  line; Route 1 is a field of lush grass where wild Shellmon lurk. Three
+  **trainers** challenge you — on contact or down their line of sight through the
+  grass — each a real 6v6 battle that stays won once beaten; the toughest, a
+  rumored ace who trains in the northeast grass, drops the *Wanderer's Halo*.
+  **Secrets** are scattered about: a stray Frostnip on the route, a Wizard Hat
+  buried in a far grass corner, and a Flower Crown glinting at the old well in
+  Tidewell — collected once and persisted. Areas are stateless templates rebuilt
+  on entry, so per-player progress (beaten trainers, found secrets) lives in the
+  save, not the map. Battles use a turn-based **6v6 engine** (`internal/shellmon`) over an original
   18-creature roster across a Spark▸Bramble▸Tide type triangle — catching,
   leveling and a full Sixel battle screen. The **battle arena** is a stark
   black-and-white night stage (a near-black starfield, dark ridge silhouettes, a
@@ -215,11 +226,11 @@ Enter on a name pre-fills a `/w` to them.
   in each Shellmon's type hue — the only colour, just like the plaza reserves it
   for names and portals — on the creature names and the attack effects (eased HP
   bars, hit shakes, faint sinks, type-styled cast motes and impact bursts). The
-  **wild route** is drawn in the same 2:1 isometric projection as the plaza — a
-  diamond field of lush swaying grass ringed by a depth-sorted forest, dotted
-  with boulders, flower clusters and a few NPC wanderers you can bump into for a
-  line; the avatar and NPCs breathe and the avatar walks, like in the plaza.
-  Entering a portal, an encounter, a duel or returning to the route all play a
+  **overworld** is drawn in the same 2:1 isometric projection as the plaza —
+  diamond fields of lush swaying grass and paved town squares ringed by a
+  depth-sorted forest, dotted with boulders, flower clusters, ponds and houses;
+  the avatar, NPCs and trainers breathe and the avatar walks, like in the plaza.
+  Entering a portal, an encounter, a duel or warping between areas all play a
   diamond-wipe transition (in the portal's own hue for the gateway). The party
   persists as a JSON roster in the per-world save slot, so no schema is
   involved.
@@ -264,9 +275,12 @@ Enter on a name pre-fills a `/w` to them.
   pipelines.
 - **Done** — Shellmon **PvP**: challenge a nearby player from their inspect card
   and fight 6v6 over the hub with the same engine.
-- **Later** — trainer battles and a route boss for Shellmon; spectating duels;
-  the Doom portal doing whatever a terminal can get away with; player-placed
-  decorations; moderation tools.
+- **Done** — a Shellmon **overworld**: two towns and a wild Route 1 with
+  line-of-sight trainer battles, a reward-dropping ace, and hidden secrets, all
+  linked by warps with per-player progress in the save.
+- **Later** — more routes and towns, a gym/route boss for Shellmon; spectating
+  duels; the Doom portal doing whatever a terminal can get away with;
+  player-placed decorations; moderation tools.
 
 ## Repository layout
 

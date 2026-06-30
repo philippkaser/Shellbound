@@ -74,8 +74,7 @@ func (w *World) Init(ctx world.Context) tea.Model {
 		m.state = stateStarter
 		m.starters = mon.Starters()
 	} else {
-		m.state = stateRoute
-		m.enterRoute()
+		m.enterArea(startArea, -1, -1)
 	}
 	m.trans.begin(0.55) // wipe in as the portal opens into the world
 	return m
@@ -109,11 +108,13 @@ type model struct {
 	starters      []mon.Species
 	starterCursor int
 
-	// route
+	// overworld
 	route      *routeState
-	partyCur   int       // cursor in the party view
-	routeMsg   string    // a transient NPC line shown on the route
-	routeMsgAt time.Time // when routeMsg was set
+	partyCur   int             // cursor in the party view
+	routeMsg   string          // a transient line shown on the overworld
+	routeMsgAt time.Time       // when routeMsg was set
+	defeated   map[string]bool // beaten trainer ids (persisted)
+	found      map[string]bool // collected secret/item ids (persisted)
 
 	// battle
 	bt      *battleUI

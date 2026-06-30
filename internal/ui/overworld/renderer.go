@@ -335,13 +335,7 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 		footX += edx
 		// A soft oval contact shadow grounds the avatar (stays on the ground).
 		drawShadow(r.screen, footX, footY)
-		frame, bob := 0, 0
-		if e.moving {
-			frame = int(t * 8)
-		} else {
-			// Gentle idle breathing so a standing avatar isn't perfectly static.
-			bob = int(math.Round(math.Sin(t*2.2+float64(i)*1.3) * 0.8))
-		}
+		frame, bob := sprites.Pose(t, e.moving, float64(i)*1.3)
 		drawY := footY + bob + edy
 		sprites.Draw(r.screen, footX, drawY, sprites.Facing(e.dir), frame, e.moving)
 		cosmetic.Draw(r.screen, footX, drawY, sprites.Facing(e.dir), e.cosmetic, t)

@@ -111,6 +111,17 @@ func HeadCenter(footX, footY int) (int, int) {
 // HeadRadius returns the head radius in pixels.
 func HeadRadius() int { return headR }
 
+// Pose picks the avatar's animation frame and vertical bob at time t: a walk
+// frame while moving, otherwise a gentle idle breathing bob. phase offsets the
+// idle bob so a crowd of avatars doesn't breathe in unison. It's the single
+// source of avatar timing shared by the plaza and the Shellmon route.
+func Pose(t float64, moving bool, phase float64) (frame, bob int) {
+	if moving {
+		return int(t * 8), 0
+	}
+	return 0, int(math.Round(math.Sin(t*2.2+phase) * 0.8))
+}
+
 // Draw paints an avatar whose feet rest at pixel (footX, footY). frame selects
 // the walk pose; facing orients the head.
 func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) {

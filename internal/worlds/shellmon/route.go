@@ -286,21 +286,16 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 		case kindRock:
 			drawRock(m.scr, footX, footY)
 		case kindNPC:
-			nbob := int(sinf(t*2.0+float64(it.n.x+it.n.y)) * 1.3) // gentle idle breathing
+			_, nbob := sprites.Pose(t, false, float64(it.n.x+it.n.y)) // gentle idle breathing
 			drawContactShadow(m.scr, footX, footY)
 			sprites.Draw(m.scr, footX, footY+nbob, it.n.facing, 0, false)
 			nameW := canvas.TextWidth(it.n.name)
 			m.scr.DrawTextShadow(footX-nameW/2, footY+nbob-sprites.Height-canvas.LineH, it.n.name, 0xB8B8B8, 0x000000)
 		default:
-			// The player: a two-step walk just after a step, an idle breathing
-			// bob otherwise — matching how the plaza animates the avatar.
+			// The player animates exactly like the plaza avatar (shared
+			// sprites.Pose): a walk just after a step, an idle bob otherwise.
 			moving := time.Since(r.lastStep) < 280*time.Millisecond
-			frame, bob := 0, 0
-			if moving {
-				frame = int(t * 10)
-			} else {
-				bob = int(sinf(t*2.5) * 1.3)
-			}
+			frame, bob := sprites.Pose(t, moving, 0)
 			drawContactShadow(m.scr, footX, footY)
 			sprites.Draw(m.scr, footX, footY+bob, r.facing, frame, moving)
 		}

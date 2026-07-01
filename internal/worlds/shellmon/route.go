@@ -165,25 +165,64 @@ func (m *model) keyRoute(key string) bool {
 		return false
 	}
 
-	// Ledges can only be hopped down (south), landing one tile beyond; from any
-	// other direction they block like a low wall.
-	if r.tile(nx, ny) == 'j' {
-		if dy == 1 && !r.blocks(nx, ny+1) {
-			r.px, r.py = nx, ny+1
-			r.lastStep = time.Now()
-			m.resolveLanding()
-		}
+	// Move: step() applies ledge hops and current sliding and returns the resting
+	// cell. If it didn't move, the way was blocked.
+	tx, ty := r.step(r.px, r.py, dx, dy)
+	if tx == r.px && ty == r.py {
 		return false
 	}
-	if r.blocks(nx, ny) {
-		return false
-	}
-
-	// Step, then resolve what we walked onto.
-	r.px, r.py = nx, ny
+	r.px, r.py = tx, ty
 	r.lastStep = time.Now()
 	m.resolveLanding()
 	return false
+}
+
+// isCurrent reports whether t is a directional water-current tile.
+func isCurrent(t byte) bool { return t == '<' || t == '>' || t == '^' || t == 'v' }
+
+// currentDir returns the flow vector of a current tile.
+func currentDir(t byte) (int, int) {
+	switch t {
+	case '<':
+		return -1, 0
+	case '>':
+		return 1, 0
+	case '^':
+		return 0, -1
+	default: // 'v'
+		return 0, 1
+	}
+}
+
+// step returns the cell the player rests in after trying to move by (dx, dy)
+// from (x, y): it applies a southward ledge hop, then rides any water currents
+// to their end (a floor tile or a wall). It returns (x, y) unchanged when the
+// way is blocked. Pure geometry — no side effects — so tests can reuse it.
+func (r *routeState) step(x, y, dx, dy int) (int, int) {
+	tx, ty := x+dx, y+dy
+	switch {
+	case r.tile(tx, ty) == 'j': // ledge: hop down only, landing one tile beyond
+		if dy == 1 && !r.blocks(tx, ty+1) {
+			ty++
+		} else {
+			return x, y
+		}
+	case r.blocks(tx, ty):
+		return x, y
+	}
+	// Ride currents: keep going in the tile's flow until a non-current stop (a
+	// floor tile) or a wall. The cap guards against a mis-authored current loop.
+	for i := 0; i < 64 && isCurrent(r.tile(tx, ty)); i++ {
+		cdx, cdy := currentDir(r.tile(tx, ty))
+		if r.blocks(tx+cdx, ty+cdy) {
+			break
+		}
+		tx, ty = tx+cdx, ty+cdy
+		if !isCurrent(r.tile(tx, ty)) {
+			break
+		}
+	}
+	return tx, ty
 }
 
 // resolveLanding reacts to the tile the player just stepped (or hopped) onto: a
@@ -277,6 +316,7 @@ func (m *model) beginTrainer(tr *trainer) {
 	m.beginBattle(team, false, tr.name)
 	m.bt.trainerID, m.bt.trainerName = tr.id, tr.name
 	m.bt.reward, m.bt.rewardN = tr.reward, tr.rewardN
+	m.bt.badge = tr.badge
 	m.bt.log = []string{tr.name + ": " + tr.intro, m.bt.log[0]}
 }
 
@@ -388,6 +428,8 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				groundSand(m.scr, px, py, x, y)
 			case 'P':
 				drawPierTile(m.scr, px, py, x, y)
+			case '<', '>', '^', 'v':
+				drawCurrentTile(m.scr, px, py, x, y, r.tile(x, y), t)
 			case 'g', '#', 'o', 'j':
 				// Short town/route grass; trees, rocks and ledges sit on it.
 				groundLawn(m.scr, px, py, x, y)
@@ -745,6 +787,35 @@ func drawWaterTile(c *canvas.Canvas, px, py, x, y int, t float64) {
 	if shade > 0.78 { // a drifting glint
 		c.Set(px, py+iso.HH-2, canvas.Color(0xC8C8E0))
 	}
+}
+
+// drawCurrentTile paints a water tile with animated chevrons drifting in the
+// flow direction — the gym's current lanes that sweep the player along.
+func drawCurrentTile(c *canvas.Canvas, px, py, x, y int, t byte, tm float64) {
+	drawWaterTile(c, px, py, x, y, tm)
+	cdx, cdy := currentDir(t)
+	cx, cy := px, py+iso.HH
+	// Two chevrons drifting along the flow, wrapping every ~10px.
+	for i := 0; i < 2; i++ {
+		drift := int((tm*10 + float64(i*5))) % 10
+		ox := cdx * (drift - 5)
+		oy := cdy * (drift - 5)
+		bx, by := cx+ox, cy+oy
+		tone := canvas.Color(0xBFBFD0)
+		// A small ">"-style chevron pointing along (cdx, cdy).
+		for k := -2; k <= 2; k++ {
+			ax := bx + cdy*k + cdx*(-abs2(k))
+			ay := by + cdx*k + cdy*(-abs2(k))
+			c.Set(ax, ay, tone)
+		}
+	}
+}
+
+func abs2(a int) int {
+	if a < 0 {
+		return -a
+	}
+	return a
 }
 
 // drawHealPad paints the well/rest pad: a pale diamond with a bright cross.

@@ -130,6 +130,9 @@ func (m *model) drawParty(pw, ph int, t float64) {
 		}
 	}
 
+	// Earned gym badges, shown along the bottom-left.
+	m.drawBadgeCase(40, ph-100)
+
 	hint := "W / S select   Enter set lead   Esc back"
 	m.scr.DrawText(pw/2-canvas.TextWidth(hint)/2, ph-30, hint, uiDim)
 }

@@ -13,12 +13,14 @@ type savedRoster struct {
 	Party    []*mon.Creature `json:"party"`
 	Defeated []string        `json:"defeated"` // beaten trainer ids
 	Found    []string        `json:"found"`    // collected secret/item ids
+	Badges   []string        `json:"badges"`   // earned gym badge ids
 }
 
 // loadRoster reads the party and overworld progress (empty on first visit).
 func (m *model) loadRoster() {
 	m.defeated = map[string]bool{}
 	m.found = map[string]bool{}
+	m.badges = map[string]bool{}
 	data, err := m.ctx.Save.Load()
 	if err != nil || len(data) == 0 {
 		return
@@ -38,6 +40,9 @@ func (m *model) loadRoster() {
 	for _, id := range sr.Found {
 		m.found[id] = true
 	}
+	for _, id := range sr.Badges {
+		m.badges[id] = true
+	}
 }
 
 // saveRoster writes the party and progress back to the SaveStore.
@@ -51,6 +56,9 @@ func (m *model) saveRoster() {
 	}
 	for id := range m.found {
 		sr.Found = append(sr.Found, id)
+	}
+	for id := range m.badges {
+		sr.Badges = append(sr.Badges, id)
 	}
 	if data, err := json.Marshal(sr); err == nil {
 		_ = m.ctx.Save.Save(data)

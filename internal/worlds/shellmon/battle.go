@@ -36,6 +36,8 @@ type battleUI struct {
 	trainerName string
 	reward      string // cosmetic key granted on first defeat
 	rewardN     string // its display name
+	badge       string // gym badge id granted on first defeat ("" = none)
+	wonBadge    bool   // set when this battle just earned the badge
 }
 
 // beginBattle opens a battle of the player's roster against an opponent team
@@ -253,6 +255,13 @@ func (m *model) afterTurn() {
 					_ = m.ctx.Inventory.Grant("cosmetic."+bt.reward, bt.rewardN, 1)
 					bt.log = appendLog(bt.log, "Received "+bt.rewardN+"! (wear it in the plaza)")
 				}
+				if bt.badge != "" && !m.badges[bt.badge] {
+					m.badges[bt.badge] = true
+					bt.wonBadge = true
+					if b, ok := badgeByID(bt.badge); ok {
+						bt.log = appendLog(bt.log, "You earned the "+b.name+"!")
+					}
+				}
 			}
 		} else {
 			bt.won = false
@@ -282,14 +291,21 @@ func (m *model) awardXP() {
 }
 
 // finishBattle closes the battle and returns to the route, healing on a loss.
+// A battle that just earned a gym badge detours through the award animation.
 func (m *model) finishBattle() {
-	if m.bt != nil && !m.bt.won && m.bt.result != "You got away safely." {
-		if !m.partyAlive() {
+	wonBadge, badge := false, ""
+	if m.bt != nil {
+		if !m.bt.won && m.bt.result != "You got away safely." && !m.partyAlive() {
 			m.healParty()
 		}
+		wonBadge, badge = m.bt.wonBadge, m.bt.badge
 	}
 	m.bt = nil
 	m.saveRoster()
+	if wonBadge {
+		m.presentBadge(badge)
+		return
+	}
 	m.trans.begin(0.45) // wipe back out to the route
 	m.state = stateRoute
 }

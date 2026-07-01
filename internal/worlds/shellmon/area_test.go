@@ -94,32 +94,32 @@ func TestLedgesAreHoppable(t *testing.T) {
 	}
 }
 
-// reachable flood-fills the walkable tiles reachable from the spawn (ledges are
-// treated as walls, so it is a conservative lower bound on what a player can get
-// to). The result is indexed y*w+x.
+// reachable BFS-explores the cells a player can actually reach from the spawn
+// under the real movement rules — step() applies ledge hops and current slides,
+// so this validates the gym's one-way current puzzle, not just raw adjacency.
+// The result is indexed y*w+x.
 func reachable(a *routeState) []bool {
 	seen := make([]bool, a.w*a.h)
-	start := a.spawnY*a.w + a.spawnX
 	if a.blocks(a.spawnX, a.spawnY) {
 		return seen
 	}
-	queue := []int{start}
+	start := a.spawnY*a.w + a.spawnX
 	seen[start] = true
+	queue := []int{start}
 	for len(queue) > 0 {
 		i := queue[0]
 		queue = queue[1:]
 		x, y := i%a.w, i/a.w
 		for _, d := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-			nx, ny := x+d[0], y+d[1]
-			if nx < 0 || ny < 0 || nx >= a.w || ny >= a.h {
+			nx, ny := a.step(x, y, d[0], d[1])
+			if nx == x && ny == y {
 				continue
 			}
 			j := ny*a.w + nx
-			if seen[j] || a.blocks(nx, ny) {
-				continue
+			if !seen[j] {
+				seen[j] = true
+				queue = append(queue, j)
 			}
-			seen[j] = true
-			queue = append(queue, j)
 		}
 	}
 	return seen

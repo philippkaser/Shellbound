@@ -34,6 +34,7 @@ const (
 	stateRoute                // roaming the wild route
 	stateParty                // viewing the party
 	stateBattle               // in a battle
+	stateBadge                // the badge-award animation
 )
 
 // World is the Shellmon portal destination.
@@ -115,6 +116,7 @@ type model struct {
 	routeMsgAt time.Time       // when routeMsg was set
 	defeated   map[string]bool // beaten trainer ids (persisted)
 	found      map[string]bool // collected secret/item ids (persisted)
+	badges     map[string]bool // earned gym badge ids (persisted)
 
 	// battle
 	bt      *battleUI
@@ -122,6 +124,10 @@ type model struct {
 	foeFX   hpFX
 	anim    battleAnim
 	animSeq int
+
+	// badge award animation (stateBadge)
+	awardBadge string    // badge id being presented
+	awardAt    time.Time // when the award animation started
 
 	trans transition // screen wipe between Shellmon screens
 }
@@ -167,6 +173,8 @@ func (m *model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.keyParty(k)
 	case stateBattle:
 		m.keyBattle(k)
+	case stateBadge:
+		m.keyBadge(k)
 	}
 	m.render()
 	return m, nil
@@ -217,6 +225,8 @@ func (m *model) render() {
 		m.drawParty(pw, ph, t)
 	case stateBattle:
 		m.drawBattle(pw, ph, t)
+	case stateBadge:
+		m.drawBadgeAward(pw, ph, t)
 	}
 	m.trans.overlay(m.scr, pw, ph)
 	m.ship(left, top)

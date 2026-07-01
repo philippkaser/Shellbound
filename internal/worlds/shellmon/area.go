@@ -47,6 +47,7 @@ type trainer struct {
 	team    []teamMon
 	reward  string // optional cosmetic key granted on first defeat ("" = none)
 	rewardN string // its display name
+	badge   string // optional gym badge id awarded on first defeat ("" = none)
 }
 
 // hiddenItem is a pickup: visible ones show an item ball, hidden ones are found
@@ -359,7 +360,7 @@ func areaTidewellBuild() *routeState {
 
 	a.warps = []warp{
 		{x: 0, y: 7, dest: areaRoute1, dx: 27, dy: 6},
-		{x: 16, y: 4, dest: areaTidewellGym, dx: 7, dy: 11}, // the gym door
+		{x: 16, y: 4, dest: areaTidewellGym, dx: 7, dy: 10}, // the gym door
 	}
 	a.npcs = []npc{
 		{x: 13, y: 6, name: "Sailor Finn", line: "The sea breeze carries odd whispers from the old well on the beach…", facing: sprites.FaceUp},
@@ -378,31 +379,46 @@ func areaTidewellBuild() *routeState {
 }
 
 func areaTidewellGymBuild() *routeState {
-	// The Tidewell Gym interior: a stone hall with two junior trainers guarding
-	// the aisle and Leader Pearl at the head of the room. The door (bottom
-	// centre) warps back out to the town. No wild encounters indoors.
+	// The Tidewell Gym is a flooded hall. A central pool is ringed by a one-way
+	// clockwise CURRENT: the bottom edge sweeps east, the right edge north, the
+	// top west, the left south. The only way across the water is to ride a
+	// current, which carries you to the next stone island (one at each edge's
+	// midpoint). Two islands are guarded by junior trainers; the north island
+	// fronts Leader Pearl. The ring loops, so you can always ride back to the
+	// entrance and leave. No wild encounters indoors.
 	a := parseArea(areaTidewellGym, "Tidewell Gym", roomField(15, 13))
-	a.spawnX, a.spawnY = 7, 11
+	a.spawnX, a.spawnY = 7, 10
 
-	// Stone pillars flanking the aisle.
-	for _, p := range [][2]int{{3, 3}, {11, 3}, {3, 8}, {11, 8}} {
-		a.set(p[0], p[1], 'o')
-	}
+	// Flood the interior, then lay the current ring on rows 3 & 9 and cols 3 & 11.
+	a.rect('~', 1, 1, 13, 11)
+	a.hrun('>', 3, 10, 9) // bottom edge → east
+	a.vrun('^', 11, 3, 9) // right edge → north
+	a.hrun('<', 4, 11, 3) // top edge → west
+	a.vrun('v', 3, 3, 8)  // left edge → south
 
-	a.warps = []warp{{x: 7, y: 12, dest: areaTidewell, dx: 16, dy: 5}}
+	// Island stops break the ring so a slide comes to rest on them.
+	a.set(7, 9, '.')  // S island (entrance side)
+	a.set(11, 6, '.') // E island (Swimmer)
+	a.set(7, 3, '.')  // N island (before Pearl)
+	a.set(3, 6, '.')  // W island (Angler)
+
+	// Entrance porch, Pearl's dais, and the trainers' perches.
+	a.set(7, 10, '.') // spawn, just inside the door
+	a.set(7, 2, '.')  // Pearl stands here, north of the N island
+	a.set(12, 6, '.') // Swimmer's perch
+	a.set(2, 6, '.')  // Angler's perch
+
+	a.warps = []warp{{x: 7, y: 11, dest: areaTidewell, dx: 16, dy: 5}}
 	a.trainers = []trainer{
-		{id: "gym-swimmer", name: "Swimmer Dana", intro: "The Leader's waters run deep — get past me first!", defeat: "Nice moves!",
-			x: 4, y: 6, facing: sprites.FaceRight, sight: 3, team: []teamMon{{"dripling", 6}, {"frostnip", 6}}},
-		{id: "gym-angler", name: "Angler Reef", intro: "Hooked yet? Let's battle!", defeat: "You're a catch.",
-			x: 10, y: 6, facing: sprites.FaceLeft, sight: 3, team: []teamMon{{"gulper", 7}}},
-		{id: "gym-pearl", name: "Leader Pearl", intro: "Welcome to my gym. Show me the tide can be turned!",
+		{id: "gym-swimmer", name: "Swimmer Dana", intro: "Caught the current, did you? Battle me!", defeat: "Strong stroke!",
+			x: 12, y: 6, facing: sprites.FaceLeft, sight: 2, team: []teamMon{{"dripling", 6}, {"frostnip", 6}}},
+		{id: "gym-angler", name: "Angler Reef", intro: "Reeled in another challenger — let's go!", defeat: "You're a catch.",
+			x: 2, y: 6, facing: sprites.FaceRight, sight: 2, team: []teamMon{{"gulper", 7}}},
+		{id: "gym-pearl", name: "Leader Pearl", intro: "You rode my currents well. Now show me the tide can be turned!",
 			defeat: "Magnificent — the Coral Badge is yours.",
-			x:      7, y: 2, facing: sprites.FaceDown, sight: 6,
+			x:      7, y: 2, facing: sprites.FaceDown, sight: 2,
 			team:   []teamMon{{"dripling", 9}, {"brineback", 10}, {"tidecoil", 12}},
-			reward: "captain", rewardN: "Captain's Cap"},
-	}
-	a.signs = []sign{
-		{x: 5, y: 11, text: "TIDEWELL GYM — Leader Pearl. Reward: the Coral Badge."},
+			reward: "captain", rewardN: "Captain's Cap", badge: "coral"},
 	}
 	a.stamp()
 	return a

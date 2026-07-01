@@ -222,9 +222,13 @@ Enter on a name pre-fills a `/w` to them.
   contact or down their line of sight through the grass — each a real 6v6 battle
   that stays won once beaten; the toughest, a rumored ace who trains in the
   northeast grass, drops the *Wanderer's Halo*. Tidewell has the region's first
-  **gym**: step to the doors of the gym hall to head inside, fight past two
-  junior trainers guarding the aisle, and challenge **Leader Pearl** for the
-  Coral Badge — the *Captain's Cap*.
+  **gym**, and it plays like one: a flooded hall where a one-way **water-current
+  ring** (bottom sweeps east, right north, top west, left south) is the only way
+  across the central pool — you ride a current and it carries you to the next
+  stone island, past two junior trainers, up to **Leader Pearl**. Beating her
+  plays an animated **badge award** and grants the **Coral Badge** (plus the
+  *Captain's Cap* to wear). Earned badges are shown in a case on the party
+  screen (`p`).
   **Secrets** are scattered about: a stray Frostnip on the route, a Wizard Hat
   buried in a far grass corner, and a Flower Crown glinting at the old well in
   Tidewell — collected once and persisted. Areas are stateless templates rebuilt
@@ -239,7 +243,8 @@ Enter on a name pre-fills a `/w` to them.
   bars, hit shakes, faint sinks, type-styled cast motes and impact bursts). The
   **overworld** is drawn in the same 2:1 isometric projection as the plaza —
   gabled cottages, a wishing-well, a lighthouse and a plank pier, tall-grass
-  patches and earthen ledges, all ringed by a depth-sorted forest; the avatar,
+  patches and earthen ledges, and the gym's flowing current lanes, all ringed by
+  a depth-sorted forest (with an irregular, hand-carved treeline); the avatar,
   NPCs and trainers breathe and the avatar walks, like in the plaza.
   Entering a portal, an encounter, a duel or warping between areas all play a
   diamond-wipe transition (in the portal's own hue for the gateway). The party

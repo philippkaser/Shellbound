@@ -8,7 +8,7 @@ import (
 )
 
 // allAreas is every area key the overworld can build.
-var allAreas = []string{areaOakhaven, areaRoute1, areaTidewell}
+var allAreas = []string{areaOakhaven, areaRoute1, areaTidewell, areaTidewellGym}
 
 // TestAreasBuild checks each area constructs with a uniform-width grid and a
 // walkable spawn cell.
@@ -33,7 +33,7 @@ func TestAreasBuild(t *testing.T) {
 func TestAreaEntitiesWalkable(t *testing.T) {
 	blocking := func(b byte) bool {
 		switch b {
-		case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j':
+		case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j', 'X', 'G':
 			return true
 		}
 		return false

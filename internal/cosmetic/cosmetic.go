@@ -78,7 +78,8 @@ var catalog = []Cosmetic{
 	{Key: "antenna", Name: "Antenna", Starter: true, Rarity: Common, draw: drawAntenna},
 	{Key: "crown", Name: "Sparkforged Crown", Rarity: Epic, draw: drawCrown},  // Bomberman reward
 	{Key: "horns", Name: "Hellbreaker Horns", Rarity: Epic, draw: drawHorns},  // Doom reward
-	{Key: "halo", Name: "Wanderer's Halo", Rarity: Legendary, draw: drawHalo}, // (future reward)
+	{Key: "halo", Name: "Wanderer's Halo", Rarity: Legendary, draw: drawHalo}, // Route 1 ace reward
+	{Key: "captain", Name: "Captain's Cap", Rarity: Epic, draw: drawCaptain},  // Tidewell Gym reward
 
 	// Shop stock — bought with coins earned by being online.
 	{Key: "beanie", Name: "Wool Beanie", Price: 30, Rarity: Common, draw: drawBeanie},
@@ -313,6 +314,31 @@ func drawWizard(c *canvas.Canvas, hx, hy, hr int, f sprites.Facing, t float64) {
 	c.FillRect(hx-hr-2, brimY, 2*hr+5, 2, low) // brim
 	c.HLine(hx-hr-2, hx+hr+2, brimY, mid)
 	c.FillCircle(hx+3, brimY-steps+1, 1, hi) // tip star
+}
+
+// drawCaptain: a peaked naval cap — a domed crown, a dark band with a front
+// badge and a stiff visor toward the facing — the Tidewell Gym reward.
+func drawCaptain(c *canvas.Canvas, hx, hy, hr int, f sprites.Facing, t float64) {
+	for dy := -hr - 2; dy <= -hr/3; dy++ { // domed crown
+		w := int(math.Sqrt(math.Max(0, float64((hr+2)*(hr+2)-dy*dy))))
+		tone := mid
+		if dy < -hr/2 {
+			tone = hi
+		}
+		c.HLine(hx-w, hx+w, hy+dy, tone)
+	}
+	bandY := hy - hr/2 - 1
+	c.FillRect(hx-hr-1, bandY, 2*hr+3, 3, dark) // band
+	c.FillCircle(hx, bandY+1, 1, hi)            // front badge
+	bxStart, bw := hx-hr+1, hr+3                // stiff visor toward the facing
+	switch f {
+	case sprites.FaceLeft:
+		bxStart = hx - hr - 3
+	case sprites.FaceRight:
+		bxStart = hx + 1
+	}
+	c.FillRect(bxStart, bandY+3, bw, 2, low)
+	c.HLine(bxStart, bxStart+bw-1, bandY+4, mid)
 }
 
 func min2(a, b int) int {

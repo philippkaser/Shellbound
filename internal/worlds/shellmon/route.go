@@ -112,7 +112,7 @@ func (r *routeState) warpAt(x, y int) *warp {
 // steps; keyRoute handles the special downward hop before this check.
 func (r *routeState) blocks(x, y int) bool {
 	switch r.tile(x, y) {
-	case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j':
+	case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j', 'X', 'G':
 		return true
 	}
 	return r.npcAt(x, y) != nil || r.trainerAt(x, y) != nil || r.signAt(x, y) != nil
@@ -341,6 +341,8 @@ const (
 	kindLighthouse
 	kindFence
 	kindLedge
+	kindWall
+	kindGym
 )
 
 type tallObj struct {
@@ -425,6 +427,10 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				k = kindFence
 			case 'j':
 				k = kindLedge
+			case 'X':
+				k = kindWall
+			case 'G':
+				k = kindGym
 			}
 			if k < 0 {
 				continue
@@ -477,6 +483,10 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 			drawFence(m.scr, footX, footY)
 		case kindLedge:
 			drawLedge(m.scr, o.px, o.py)
+		case kindWall:
+			drawWall(m.scr, o.px, o.py)
+		case kindGym:
+			drawGym(m.scr, o.px, o.py)
 		case kindSign:
 			drawSign(m.scr, footX, footY)
 		case kindItem:
@@ -812,6 +822,50 @@ func drawHouse(c *canvas.Canvas, vx, vy int) {
 	drawRidge(c, apex, bm, canvas.Color(0xECECEC))
 	drawRidge(c, apex, lf, canvas.Color(0x6E6E6E))
 	drawRidge(c, apex, rt, canvas.Color(0xE2E2E2))
+}
+
+// drawWall paints an interior stone wall block (for gym rooms) whose ground
+// diamond top vertex is at (vx, vy): a plain isometric cube in cool stone tones.
+func drawWall(c *canvas.Canvas, vx, vy int) {
+	iso.DrawCube(c, vx, vy, 24,
+		canvas.Color(0x8C8C94), // top
+		canvas.Color(0x50505A), // left face
+		canvas.Color(0x6C6C76)) // right face
+}
+
+// drawGym paints a prominent civic building: a tall isometric hall with a
+// pediment gable and a banner over the door — Tidewell's gym.
+func drawGym(c *canvas.Canvas, vx, vy int) {
+	const wallH = 40
+	iso.DrawCube(c, vx, vy, wallH,
+		canvas.Color(0xB0B0B0), // top
+		canvas.Color(0x707070), // left face
+		canvas.Color(0x969696)) // right face
+
+	// Wide double doors on the lit right face, resting on the ground edge.
+	rightEdge := func(dx int) int { return vy + iso.TileH - dx/2 }
+	for dx := 6; dx <= 18; dx++ {
+		b := rightEdge(dx)
+		for y := b - 20; y < b; y++ {
+			c.Set(vx+dx, y, canvas.Color(0x24201C))
+		}
+	}
+	c.VLine(vx+12, rightEdge(12)-20, rightEdge(12)-1, canvas.Color(0x0E0C0A)) // door split
+
+	// A big gabled roof with a pediment, plus a banner ridge.
+	topY := vy - wallH
+	bm := [2]int{vx, topY + iso.TileH + 4}
+	lf := [2]int{vx - iso.HW - 4, topY + iso.HH}
+	rt := [2]int{vx + iso.HW + 4, topY + iso.HH}
+	apex := [2]int{vx, topY + iso.HH - 22}
+	fillTriangle(c, lf, bm, apex, canvas.Color(0x9A9A9A))
+	fillTriangle(c, bm, rt, apex, canvas.Color(0xC8C8C8))
+	drawRidge(c, apex, bm, canvas.Color(0xF0F0F0))
+	drawRidge(c, apex, lf, canvas.Color(0x707070))
+	drawRidge(c, apex, rt, canvas.Color(0xE6E6E6))
+	// A banner hanging from the eave above the doors.
+	c.FillRect(vx+6, topY+iso.HH+6, 12, 8, canvas.Color(0x3A3A3A))
+	c.HLine(vx+7, vx+16, topY+iso.HH+9, canvas.Color(0xD0D0D0))
 }
 
 // fillTriangle scanline-fills the triangle (a, b, c) with col.

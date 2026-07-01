@@ -9,10 +9,11 @@ import "github.com/shellbound/shellbound/internal/render/sprites"
 // persisted in the save.
 
 const (
-	areaOakhaven = "oakhaven" // start town
-	areaRoute1   = "route1"   // the wild route
-	areaTidewell = "tidewell" // end town
-	startArea    = areaOakhaven
+	areaOakhaven    = "oakhaven"     // start town
+	areaRoute1      = "route1"       // the wild route
+	areaTidewell    = "tidewell"     // end town
+	areaTidewellGym = "tidewell_gym" // the gym interior
+	startArea       = areaOakhaven
 )
 
 // warp moves the player to another area when stepped on.
@@ -67,6 +68,8 @@ func buildArea(key string) *routeState {
 		return areaRoute1Build()
 	case areaTidewell:
 		return areaTidewellBuild()
+	case areaTidewellGym:
+		return areaTidewellGymBuild()
 	default:
 		return areaOakhavenBuild()
 	}
@@ -174,6 +177,24 @@ func baseField(w, h int) []string {
 				b[x] = '#'
 			} else {
 				b[x] = 'g'
+			}
+		}
+		rows[y] = string(b)
+	}
+	return rows
+}
+
+// roomField builds a w×h indoor room: stone walls ('X') around a paved floor
+// ('.'). Used for interiors like the gym.
+func roomField(w, h int) []string {
+	rows := make([]string, h)
+	for y := 0; y < h; y++ {
+		b := make([]byte, w)
+		for x := 0; x < w; x++ {
+			if x == 0 || y == 0 || x == w-1 || y == h-1 {
+				b[x] = 'X'
+			} else {
+				b[x] = '.'
 			}
 		}
 		rows[y] = string(b)
@@ -303,46 +324,86 @@ func areaRoute1Build() *routeState {
 }
 
 func areaTidewellBuild() *routeState {
-	// Tidewell — a breezy seaside port. A sandy bay fills the south, crossed by a
-	// wooden fishing pier, with a striped lighthouse on the eastern point.
-	// Cottages sit up on the green. West gate (col 0, row 7) → Route 1.
+	// Tidewell — a breezy seaside port that opens straight onto the ocean to the
+	// south: no treeline there, the sea itself is the edge. A sandy shore fronts
+	// the water, crossed by a wooden fishing pier, with a striped lighthouse on
+	// the eastern point and the town's gym up on the green. West gate (col 0, row
+	// 7) → Route 1.
 	a := parseArea(areaTidewell, "Tidewell", baseField(23, 14))
 	a.spawnX, a.spawnY = 2, 7
 
-	// Waterfront: a broad sandy shore with the bay cut into it.
-	a.rect('s', 3, 8, 19, 12)
-	a.rect('~', 5, 9, 17, 12)
-	a.rect('~', 7, 8, 15, 8)
-
-	// Roads and the fishing pier reaching out over the water.
-	a.hrun('.', 1, 19, 7) // seafront road / west gate
+	// Landward town first, then rough the inland treeline.
+	a.hrun('.', 1, 19, 7) // seafront promenade / west gate
 	a.vrun('.', 8, 1, 6)  // lane up to the cottages
-	a.vrun('P', 11, 8, 11)
-	a.set(10, 11, 'P')
-	a.set(12, 11, 'P')
-
-	// The lighthouse on the eastern point, and cottages on the green.
-	a.set(18, 9, 'L')
-	for _, p := range [][2]int{{3, 2}, {9, 2}, {15, 2}} {
+	for _, p := range [][2]int{{3, 2}, {9, 2}} {
 		a.set(p[0], p[1], 'B')
 	}
-	a.set(15, 4, 'H') // rest pad by a cottage
+	a.set(16, 3, 'G') // the gym hall
+	a.set(12, 4, 'H') // rest pad
 	a.set(5, 4, 'f')
-	a.set(19, 3, 'f')
+	a.set(20, 3, 'f')
+	a.roughen(3)
 
-	a.warps = []warp{{x: 0, y: 7, dest: areaRoute1, dx: 27, dy: 6}}
+	// Open ocean across the south (painted after roughen so it replaces the
+	// would-be south treeline — the sea is the map edge here).
+	a.rect('s', 1, 8, 21, 10)  // broad sandy shore
+	a.rect('~', 0, 11, 22, 13) // open sea to the edge
+	a.rect('~', 4, 9, 18, 12)  // the bay
+	a.rect('~', 7, 8, 15, 8)   // an inlet lapping the promenade
+
+	// The fishing pier out over the water, and the lighthouse on the east point.
+	a.vrun('P', 11, 8, 12)
+	a.set(10, 12, 'P')
+	a.set(12, 12, 'P')
+	a.set(19, 9, 'L')
+
+	a.warps = []warp{
+		{x: 0, y: 7, dest: areaRoute1, dx: 27, dy: 6},
+		{x: 16, y: 4, dest: areaTidewellGym, dx: 7, dy: 11}, // the gym door
+	}
 	a.npcs = []npc{
-		{x: 16, y: 5, name: "Champion Pearl", line: "You crossed Route 1? Tidewell salutes you, traveler.", facing: sprites.FaceDown},
-		{x: 13, y: 7, name: "Sailor Finn", line: "The sea breeze carries odd whispers from the old well on the beach…", facing: sprites.FaceUp},
+		{x: 13, y: 6, name: "Sailor Finn", line: "The sea breeze carries odd whispers from the old well on the beach…", facing: sprites.FaceUp},
+		{x: 14, y: 5, name: "Gym Guide", line: "The Tidewell Gym! Leader Pearl commands the tides — beat her for the Coral Badge.", facing: sprites.FaceRight},
 	}
 	a.signs = []sign{
 		{x: 5, y: 5, text: "Tidewell — where Route 1 meets the sea. Mind the pier!"},
+		{x: 14, y: 4, text: "TIDEWELL GYM — Leader Pearl. Step to the doors to enter."},
 	}
 	// Hidden on the west beach — search the sand beside the old well.
 	a.items = []hiddenItem{
-		{id: "tw-well", x: 4, y: 9, visible: false, msg: "Something glints in the old well — a Flower Crown!", cosmetic: "flower", cosmeticName: "Flower Crown"},
+		{id: "tw-well", x: 3, y: 9, visible: false, msg: "Something glints in the old well — a Flower Crown!", cosmetic: "flower", cosmeticName: "Flower Crown"},
 	}
-	a.roughen(3)
+	a.stamp()
+	return a
+}
+
+func areaTidewellGymBuild() *routeState {
+	// The Tidewell Gym interior: a stone hall with two junior trainers guarding
+	// the aisle and Leader Pearl at the head of the room. The door (bottom
+	// centre) warps back out to the town. No wild encounters indoors.
+	a := parseArea(areaTidewellGym, "Tidewell Gym", roomField(15, 13))
+	a.spawnX, a.spawnY = 7, 11
+
+	// Stone pillars flanking the aisle.
+	for _, p := range [][2]int{{3, 3}, {11, 3}, {3, 8}, {11, 8}} {
+		a.set(p[0], p[1], 'o')
+	}
+
+	a.warps = []warp{{x: 7, y: 12, dest: areaTidewell, dx: 16, dy: 5}}
+	a.trainers = []trainer{
+		{id: "gym-swimmer", name: "Swimmer Dana", intro: "The Leader's waters run deep — get past me first!", defeat: "Nice moves!",
+			x: 4, y: 6, facing: sprites.FaceRight, sight: 3, team: []teamMon{{"dripling", 6}, {"frostnip", 6}}},
+		{id: "gym-angler", name: "Angler Reef", intro: "Hooked yet? Let's battle!", defeat: "You're a catch.",
+			x: 10, y: 6, facing: sprites.FaceLeft, sight: 3, team: []teamMon{{"gulper", 7}}},
+		{id: "gym-pearl", name: "Leader Pearl", intro: "Welcome to my gym. Show me the tide can be turned!",
+			defeat: "Magnificent — the Coral Badge is yours.",
+			x:      7, y: 2, facing: sprites.FaceDown, sight: 6,
+			team:   []teamMon{{"dripling", 9}, {"brineback", 10}, {"tidecoil", 12}},
+			reward: "captain", rewardN: "Captain's Cap"},
+	}
+	a.signs = []sign{
+		{x: 5, y: 11, text: "TIDEWELL GYM — Leader Pearl. Reward: the Coral Badge."},
+	}
 	a.stamp()
 	return a
 }

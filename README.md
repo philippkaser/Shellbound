@@ -209,17 +209,22 @@ Enter on a name pre-fills a `/w` to them.
   shellmon`): pick one of three starters, then set out across a little
   **overworld** — the starting town of **Oakhaven**, **Route 1**, and the
   seaside town of **Tidewell** at the far end — linked by edge warps, each with
-  its own charm. Oakhaven is a cozy inland village around a stone wishing-well,
-  with cottages, a fenced paddock and flower beds; Tidewell is a seaside port
-  with a sandy bay, a wooden fishing pier and a striped lighthouse. The towns are
-  paved and lawned (no wild grass, so nothing spawns in them), with rest/heal
-  pads, signs to read and NPCs to bump for a line. Route 1 is drawn in the
-  Pokémon idiom: a dirt path threading short grass past defined patches of tall
-  grass (the only tiles that hide wild Shellmon) and a ledge you can hop down but
-  not climb back up. Three **trainers** challenge you — on contact or down their
-  line of sight through the grass — each a real 6v6 battle that stays won once
-  beaten; the toughest, a rumored ace who trains in the northeast grass, drops
-  the *Wanderer's Halo*.
+  its own charm and an irregular, hand-carved treeline (no strict rectangles).
+  Oakhaven is a cozy inland village around a stone wishing-well, with cottages, a
+  fenced paddock and flower beds; Tidewell is a seaside port that opens straight
+  onto the **open ocean** to the south — no treeline there, the sea is the map
+  edge — fronted by a sandy shore, a wooden fishing pier and a striped
+  lighthouse. The towns are paved and lawned (no wild grass, so nothing spawns in
+  them), with rest/heal pads, signs to read and NPCs to bump for a line. Route 1
+  is drawn in the Pokémon idiom: a dirt path threading short grass past defined
+  patches of tall grass (the only tiles that hide wild Shellmon) and a ledge you
+  can hop down but not climb back up. Three **trainers** challenge you — on
+  contact or down their line of sight through the grass — each a real 6v6 battle
+  that stays won once beaten; the toughest, a rumored ace who trains in the
+  northeast grass, drops the *Wanderer's Halo*. Tidewell has the region's first
+  **gym**: step to the doors of the gym hall to head inside, fight past two
+  junior trainers guarding the aisle, and challenge **Leader Pearl** for the
+  Coral Badge — the *Captain's Cap*.
   **Secrets** are scattered about: a stray Frostnip on the route, a Wizard Hat
   buried in a far grass corner, and a Flower Crown glinting at the old well in
   Tidewell — collected once and persisted. Areas are stateless templates rebuilt
@@ -251,8 +256,9 @@ Enter on a name pre-fills a `/w` to them.
 - **Cosmetics.** Headwear worn over the avatar (`internal/cosmetic`), drawn in
   the same monochrome, overhead-lit style. Pieces come from three places:
   starters everyone has (cap, headband, top hat, antenna), rewards for clearing
-  the worlds (crown, horns, halo), and shop stock bought with coins (beanie,
-  bow, visor, flower crown, wizard hat). Each carries a **rarity tier** —
+  the worlds (crown, horns, halo, and the gym's captain's cap), and shop stock
+  bought with coins (beanie, bow, visor, flower crown, wizard hat). Each carries
+  a **rarity tier** —
   Common, Rare, Epic, Legendary (shown as a text label, since the strict color
   discipline reserves color for names, chat and portals) — surfaced in the shop,
   the wardrobe, and a player's inspect card. The wardrobe panel (`c`) lists what
@@ -281,12 +287,14 @@ Enter on a name pre-fills a `/w` to them.
   pipelines.
 - **Done** — Shellmon **PvP**: challenge a nearby player from their inspect card
   and fight 6v6 over the hub with the same engine.
-- **Done** — a Shellmon **overworld**: two towns and a wild Route 1 with
-  line-of-sight trainer battles, a reward-dropping ace, and hidden secrets, all
-  linked by warps with per-player progress in the save.
-- **Later** — more routes and towns, a gym/route boss for Shellmon; spectating
-  duels; the Doom portal doing whatever a terminal can get away with;
-  player-placed decorations; moderation tools.
+- **Done** — a Shellmon **overworld**: two towns (one opening onto the ocean)
+  and a wild Route 1 with line-of-sight trainer battles, ledges, a
+  reward-dropping ace, hidden secrets, and the first **gym** (an indoor hall
+  with junior trainers and Leader Pearl for the Coral Badge) — all linked by
+  warps with per-player progress in the save.
+- **Later** — more routes and towns and gyms for Shellmon; spectating duels;
+  the Doom portal doing whatever a terminal can get away with; player-placed
+  decorations; moderation tools.
 
 ## Repository layout
 

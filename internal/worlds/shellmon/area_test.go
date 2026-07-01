@@ -31,13 +31,7 @@ func TestAreasBuild(t *testing.T) {
 // on a tile the player can actually stand on (stamp clears NPC/warp/sign/trainer
 // tiles, so only items and the tiles beneath them need independent checking).
 func TestAreaEntitiesWalkable(t *testing.T) {
-	blocking := func(b byte) bool {
-		switch b {
-		case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j', 'X', 'G':
-			return true
-		}
-		return false
-	}
+	blocking := solidTile // entities/warps must not sit on a solid tile
 	for _, key := range allAreas {
 		a := buildArea(key)
 		for _, w := range a.warps {

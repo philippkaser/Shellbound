@@ -118,6 +118,51 @@ func (a *routeState) rect(t byte, x0, y0, x1, y1 int) {
 	}
 }
 
+// roughen eats an irregular treeline into the field's borders so the walkable
+// area isn't a strict rectangle. The inset waves with a couple of sines (phased
+// per area by seed) for an organic edge. It only thickens over plain short-grass
+// ('g') that holds no item or entity, so paths, grass patches, water, buildings
+// and every gate approach are left intact.
+func (a *routeState) roughen(seed int) {
+	ph := float64(seed)
+	inset := func(i int) int {
+		d := 1.3 + 1.2*sinf(float64(i)*0.6+ph) + 0.5*sinf(float64(i)*1.7+ph*1.7)
+		n := int(d)
+		if n < 0 {
+			n = 0
+		}
+		if n > 3 {
+			n = 3
+		}
+		return n
+	}
+	grow := func(x, y int) {
+		if a.tile(x, y) != 'g' {
+			return
+		}
+		if a.itemAt(x, y) != nil || a.npcAt(x, y) != nil || a.trainerAt(x, y) != nil || a.signAt(x, y) != nil {
+			return
+		}
+		a.set(x, y, '#')
+	}
+	for x := 1; x < a.w-1; x++ {
+		for d := 1; d <= inset(x); d++ {
+			grow(x, d)
+		}
+		for d := 1; d <= inset(x+7); d++ {
+			grow(x, a.h-1-d)
+		}
+	}
+	for y := 1; y < a.h-1; y++ {
+		for d := 1; d <= inset(y+3); d++ {
+			grow(d, y)
+		}
+		for d := 1; d <= inset(y+11); d++ {
+			grow(a.w-1-d, y)
+		}
+	}
+}
+
 // baseField builds a w×h field enclosed by trees with a short-grass ('g')
 // interior. Towns and routes both start from this and stamp features on top.
 func baseField(w, h int) []string {
@@ -192,6 +237,7 @@ func areaOakhavenBuild() *routeState {
 		{x: 9, y: 3, text: "Oakhaven — a quiet shell of a town. Make a wish at the well!"},
 		{x: 20, y: 6, text: "Route 1 ahead. Tidewell lies beyond the grass."},
 	}
+	a.roughen(1)
 	a.stamp()
 	return a
 }
@@ -251,6 +297,7 @@ func areaRoute1Build() *routeState {
 		{id: "r1-frost", x: 3, y: 7, visible: true, msg: "A lonely Frostnip tags along!", creature: "frostnip", level: 5},
 		{id: "r1-buried", x: 25, y: 2, visible: false, msg: "You dig up a buried Wizard Hat!", cosmetic: "wizard", cosmeticName: "Wizard Hat"},
 	}
+	a.roughen(2)
 	a.stamp()
 	return a
 }
@@ -295,6 +342,7 @@ func areaTidewellBuild() *routeState {
 	a.items = []hiddenItem{
 		{id: "tw-well", x: 4, y: 9, visible: false, msg: "Something glints in the old well — a Flower Crown!", cosmetic: "flower", cosmeticName: "Flower Crown"},
 	}
+	a.roughen(3)
 	a.stamp()
 	return a
 }

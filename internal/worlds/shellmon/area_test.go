@@ -94,6 +94,82 @@ func TestLedgesAreHoppable(t *testing.T) {
 	}
 }
 
+// reachable flood-fills the walkable tiles reachable from the spawn (ledges are
+// treated as walls, so it is a conservative lower bound on what a player can get
+// to). The result is indexed y*w+x.
+func reachable(a *routeState) []bool {
+	seen := make([]bool, a.w*a.h)
+	start := a.spawnY*a.w + a.spawnX
+	if a.blocks(a.spawnX, a.spawnY) {
+		return seen
+	}
+	queue := []int{start}
+	seen[start] = true
+	for len(queue) > 0 {
+		i := queue[0]
+		queue = queue[1:]
+		x, y := i%a.w, i/a.w
+		for _, d := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+			nx, ny := x+d[0], y+d[1]
+			if nx < 0 || ny < 0 || nx >= a.w || ny >= a.h {
+				continue
+			}
+			j := ny*a.w + nx
+			if seen[j] || a.blocks(nx, ny) {
+				continue
+			}
+			seen[j] = true
+			queue = append(queue, j)
+		}
+	}
+	return seen
+}
+
+// TestAreasConnected checks that after roughening the borders, every warp, heal
+// pad and item is reachable from the spawn, and every NPC/trainer/sign has a
+// reachable tile beside it to interact from — nothing gets walled off.
+func TestAreasConnected(t *testing.T) {
+	for _, key := range allAreas {
+		a := buildArea(key)
+		seen := reachable(a)
+		at := func(x, y int) bool { return x >= 0 && y >= 0 && x < a.w && y < a.h && seen[y*a.w+x] }
+		adj := func(x, y int) bool { return at(x+1, y) || at(x-1, y) || at(x, y+1) || at(x, y-1) }
+
+		for _, w := range a.warps {
+			if !at(w.x, w.y) {
+				t.Errorf("%s: warp at (%d,%d) is unreachable from spawn", key, w.x, w.y)
+			}
+		}
+		for _, it := range a.items {
+			if !at(it.x, it.y) {
+				t.Errorf("%s: item %s at (%d,%d) is unreachable", key, it.id, it.x, it.y)
+			}
+		}
+		for y := 0; y < a.h; y++ {
+			for x := 0; x < a.w; x++ {
+				if a.tile(x, y) == 'H' && !at(x, y) {
+					t.Errorf("%s: heal pad (%d,%d) is unreachable", key, x, y)
+				}
+			}
+		}
+		for _, n := range a.npcs {
+			if !adj(n.x, n.y) {
+				t.Errorf("%s: npc %s at (%d,%d) has no reachable tile beside it", key, n.name, n.x, n.y)
+			}
+		}
+		for _, tr := range a.trainers {
+			if !adj(tr.x, tr.y) {
+				t.Errorf("%s: trainer %s at (%d,%d) has no reachable tile beside it", key, tr.id, tr.x, tr.y)
+			}
+		}
+		for _, s := range a.signs {
+			if !adj(s.x, s.y) {
+				t.Errorf("%s: sign at (%d,%d) has no reachable tile beside it", key, s.x, s.y)
+			}
+		}
+	}
+}
+
 // TestWarpsConnect checks that every warp targets a real area and lands the
 // player on a walkable cell there.
 func TestWarpsConnect(t *testing.T) {

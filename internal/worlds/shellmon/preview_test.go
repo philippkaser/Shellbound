@@ -31,6 +31,7 @@ func TestRenderAreaPreviews(t *testing.T) {
 			found:    map[string]bool{},
 		}
 		m.enterArea(key, -1, -1)
+		m.route.px, m.route.py = m.route.w/2, m.route.h/2 // center the camera for the shot
 		m.scr.Clear(canvas.Black)
 		m.drawRoute(pw, ph, 0.6)
 

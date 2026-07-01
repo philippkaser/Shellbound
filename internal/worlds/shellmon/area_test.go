@@ -33,7 +33,7 @@ func TestAreasBuild(t *testing.T) {
 func TestAreaEntitiesWalkable(t *testing.T) {
 	blocking := func(b byte) bool {
 		switch b {
-		case '#', 'o', '~', 'B':
+		case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j':
 			return true
 		}
 		return false
@@ -58,6 +58,37 @@ func TestAreaEntitiesWalkable(t *testing.T) {
 		for _, tr := range a.trainers {
 			if blocking(a.tile(tr.x, tr.y)) {
 				t.Errorf("%s: trainer %s at (%d,%d) sits on a blocking tile %q", key, tr.id, tr.x, tr.y, a.tile(tr.x, tr.y))
+			}
+		}
+	}
+}
+
+// TestTownsHaveNoWildGrass checks that non-encounter areas (the towns) contain
+// no tall-grass ',' tiles, so nothing can spawn there.
+func TestTownsHaveNoWildGrass(t *testing.T) {
+	for _, key := range allAreas {
+		a := buildArea(key)
+		if a.encounters {
+			continue
+		}
+		for i, b := range a.tiles {
+			if b == ',' {
+				t.Errorf("%s: town has tall grass at (%d,%d)", key, i%a.w, i/a.w)
+			}
+		}
+	}
+}
+
+// TestLedgesAreHoppable checks that every ledge has a walkable tile directly
+// below it, so the southward hop always has somewhere to land.
+func TestLedgesAreHoppable(t *testing.T) {
+	for _, key := range allAreas {
+		a := buildArea(key)
+		for y := 0; y < a.h; y++ {
+			for x := 0; x < a.w; x++ {
+				if a.tile(x, y) == 'j' && a.blocks(x, y+1) {
+					t.Errorf("%s: ledge at (%d,%d) has no landing below", key, x, y)
+				}
 			}
 		}
 	}

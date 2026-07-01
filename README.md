@@ -208,12 +208,18 @@ Enter on a name pre-fills a `/w` to them.
   **Shellmon** portal leads to a **creature collector** (`internal/worlds/
   shellmon`): pick one of three starters, then set out across a little
   **overworld** — the starting town of **Oakhaven**, **Route 1**, and the
-  seaside town of **Tidewell** at the far end — linked by edge warps. Towns have
-  houses, a rest/heal well-pad (the cross), signs to read and NPCs to bump for a
-  line; Route 1 is a field of lush grass where wild Shellmon lurk. Three
-  **trainers** challenge you — on contact or down their line of sight through the
-  grass — each a real 6v6 battle that stays won once beaten; the toughest, a
-  rumored ace who trains in the northeast grass, drops the *Wanderer's Halo*.
+  seaside town of **Tidewell** at the far end — linked by edge warps, each with
+  its own charm. Oakhaven is a cozy inland village around a stone wishing-well,
+  with cottages, a fenced paddock and flower beds; Tidewell is a seaside port
+  with a sandy bay, a wooden fishing pier and a striped lighthouse. The towns are
+  paved and lawned (no wild grass, so nothing spawns in them), with rest/heal
+  pads, signs to read and NPCs to bump for a line. Route 1 is drawn in the
+  Pokémon idiom: a dirt path threading short grass past defined patches of tall
+  grass (the only tiles that hide wild Shellmon) and a ledge you can hop down but
+  not climb back up. Three **trainers** challenge you — on contact or down their
+  line of sight through the grass — each a real 6v6 battle that stays won once
+  beaten; the toughest, a rumored ace who trains in the northeast grass, drops
+  the *Wanderer's Halo*.
   **Secrets** are scattered about: a stray Frostnip on the route, a Wizard Hat
   buried in a far grass corner, and a Flower Crown glinting at the old well in
   Tidewell — collected once and persisted. Areas are stateless templates rebuilt
@@ -227,9 +233,9 @@ Enter on a name pre-fills a `/w` to them.
   for names and portals — on the creature names and the attack effects (eased HP
   bars, hit shakes, faint sinks, type-styled cast motes and impact bursts). The
   **overworld** is drawn in the same 2:1 isometric projection as the plaza —
-  diamond fields of lush swaying grass and paved town squares ringed by a
-  depth-sorted forest, dotted with boulders, flower clusters, ponds and houses;
-  the avatar, NPCs and trainers breathe and the avatar walks, like in the plaza.
+  gabled cottages, a wishing-well, a lighthouse and a plank pier, tall-grass
+  patches and earthen ledges, all ringed by a depth-sorted forest; the avatar,
+  NPCs and trainers breathe and the avatar walks, like in the plaza.
   Entering a portal, an encounter, a duel or warping between areas all play a
   diamond-wipe transition (in the portal's own hue for the gateway). The party
   persists as a JSON roster in the per-world save slot, so no schema is

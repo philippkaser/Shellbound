@@ -108,10 +108,11 @@ func (r *routeState) warpAt(x, y int) *warp {
 }
 
 // blocks reports whether a cell stops movement (trees, rocks, water, buildings,
-// and standing NPCs/trainers/signs).
+// landmarks, ledges and standing NPCs/trainers/signs). Ledges block ordinary
+// steps; keyRoute handles the special downward hop before this check.
 func (r *routeState) blocks(x, y int) bool {
 	switch r.tile(x, y) {
-	case '#', 'o', '~', 'B':
+	case '#', 'o', '~', 'B', 'W', 'L', 'e', 'j':
 		return true
 	}
 	return r.npcAt(x, y) != nil || r.trainerAt(x, y) != nil || r.signAt(x, y) != nil
@@ -163,6 +164,17 @@ func (m *model) keyRoute(key string) bool {
 		m.say(s.text)
 		return false
 	}
+
+	// Ledges can only be hopped down (south), landing one tile beyond; from any
+	// other direction they block like a low wall.
+	if r.tile(nx, ny) == 'j' {
+		if dy == 1 && !r.blocks(nx, ny+1) {
+			r.px, r.py = nx, ny+1
+			r.lastStep = time.Now()
+			m.resolveLanding()
+		}
+		return false
+	}
 	if r.blocks(nx, ny) {
 		return false
 	}
@@ -170,30 +182,36 @@ func (m *model) keyRoute(key string) bool {
 	// Step, then resolve what we walked onto.
 	r.px, r.py = nx, ny
 	r.lastStep = time.Now()
+	m.resolveLanding()
+	return false
+}
 
+// resolveLanding reacts to the tile the player just stepped (or hopped) onto: a
+// warp, a heal pad, a pickup, a wild encounter, or a trainer's line of sight.
+func (m *model) resolveLanding() {
+	r := m.route
+	nx, ny := r.px, r.py
 	if w := r.warpAt(nx, ny); w != nil {
 		m.enterArea(w.dest, w.dx, w.dy)
-		return false
+		return
 	}
 	if r.tile(nx, ny) == 'H' {
 		m.healParty()
 		m.say("Your team was fully healed!")
-		return false
+		return
 	}
 	if it := r.itemAt(nx, ny); it != nil && !m.found[it.id] {
 		m.collect(it)
-		return false
+		return
 	}
 	if r.encounters && r.tile(nx, ny) == ',' && m.rng.Float64() < encounterRate {
 		m.startWildBattle()
-		return false
+		return
 	}
-	// A trainer may notice you from down their line of sight.
 	if tr := m.spotter(); tr != nil {
 		m.say(tr.name + " spotted you!")
 		m.beginTrainer(tr)
 	}
-	return false
 }
 
 // say shows a transient line in the overworld speech panel.
@@ -319,6 +337,10 @@ const (
 	kindNPC
 	kindTrainer
 	kindItem
+	kindWell
+	kindLighthouse
+	kindFence
+	kindLedge
 )
 
 type tallObj struct {
@@ -354,13 +376,20 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				groundGrass(m.scr, px, py, x, y)
 				drawTallGrass(m.scr, px, py+iso.HH, x, y, t)
 			case 'f':
-				groundGrass(m.scr, px, py, x, y)
+				groundLawn(m.scr, px, py, x, y)
 				drawFlowers(m.scr, px, py+iso.HH, x, y, t)
 			case '~':
 				drawWaterTile(m.scr, px, py, x, y, t)
 			case 'H':
 				drawHealPad(m.scr, px, py)
-			default: // '.', '#', 'o', 'B' all sit on paved ground
+			case 's':
+				groundSand(m.scr, px, py, x, y)
+			case 'P':
+				drawPierTile(m.scr, px, py, x, y)
+			case 'g', '#', 'o', 'j':
+				// Short town/route grass; trees, rocks and ledges sit on it.
+				groundLawn(m.scr, px, py, x, y)
+			default: // '.', 'B', 'W', 'L', 'e' sit on paved/dirt ground
 				fill := routePath
 				if (x+y)&1 == 0 {
 					fill = routePathB
@@ -388,6 +417,14 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				k = kindRock
 			case 'B':
 				k = kindHouse
+			case 'W':
+				k = kindWell
+			case 'L':
+				k = kindLighthouse
+			case 'e':
+				k = kindFence
+			case 'j':
+				k = kindLedge
 			}
 			if k < 0 {
 				continue
@@ -432,6 +469,14 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 			drawRock(m.scr, footX, footY)
 		case kindHouse:
 			drawHouse(m.scr, o.px, o.py)
+		case kindWell:
+			drawWell(m.scr, footX, footY)
+		case kindLighthouse:
+			drawLighthouse(m.scr, footX, footY, t)
+		case kindFence:
+			drawFence(m.scr, footX, footY)
+		case kindLedge:
+			drawLedge(m.scr, o.px, o.py)
 		case kindSign:
 			drawSign(m.scr, footX, footY)
 		case kindItem:
@@ -491,6 +536,129 @@ func groundGrass(c *canvas.Canvas, px, py, x, y int) {
 		fill = routeGrasB
 	}
 	iso.DrawDiamond(c, px, py, fill, routeEdge)
+}
+
+// groundLawn paints manicured short grass: a flat green diamond with a light
+// speckle but no tall swaying blades, so towns don't read as wild-encounter
+// grass. Also used as the natural floor under trees, rocks and ledges.
+func groundLawn(c *canvas.Canvas, px, py, x, y int) {
+	fill := canvas.Color(0x1B1F1B)
+	if (x+y)&1 == 0 {
+		fill = canvas.Color(0x202420)
+	}
+	iso.DrawDiamond(c, px, py, fill, routeEdge)
+	cx, cy := px, py+iso.HH
+	seed := x*7 + y*13
+	for i := 0; i < 4; i++ {
+		bx := cx - 12 + ((seed + i*7) % 24)
+		by := cy - 5 + ((seed + i*5) % 9)
+		c.Set(bx, by, canvas.Color(0x2C302C))
+	}
+}
+
+// groundSand paints a pale, grainy shore tile.
+func groundSand(c *canvas.Canvas, px, py, x, y int) {
+	fill := canvas.Color(0x2B2A26)
+	if (x+y)&1 == 0 {
+		fill = canvas.Color(0x33322C)
+	}
+	iso.DrawDiamond(c, px, py, fill, canvas.Color(0x1A1914))
+	cx, cy := px, py+iso.HH
+	seed := x*5 + y*11
+	for i := 0; i < 3; i++ {
+		gx := cx - 11 + ((seed + i*9) % 22)
+		gy := cy - 4 + ((seed + i*6) % 8)
+		c.Set(gx, gy, canvas.Color(0x3E3C34))
+	}
+}
+
+// drawPierTile paints a wooden plank walkway sitting over water.
+func drawPierTile(c *canvas.Canvas, px, py, x, y int) {
+	iso.DrawDiamond(c, px, py, canvas.Color(0x141420), canvas.Color(0x0E0E16)) // water at the edges
+	wood := canvas.Color(0x3A322A)
+	if (x+y)&1 == 0 {
+		wood = canvas.Color(0x453B30)
+	}
+	cx, cy := px, py+iso.HH
+	for dy := -6; dy <= 6; dy++ {
+		half := (iso.HW - 5) * (6 - absi(dy)) / 6
+		for dx := -half; dx <= half; dx++ {
+			c.Set(cx+dx, cy+dy, wood)
+		}
+	}
+	c.HLine(cx-11, cx+11, cy-2, canvas.Color(0x2A241E)) // plank seams
+	c.HLine(cx-11, cx+11, cy+2, canvas.Color(0x2A241E))
+}
+
+// drawWell paints a little stone wishing-well: a round rim over water with a
+// shingled roof on two posts — Oakhaven's town-square centerpiece.
+func drawWell(c *canvas.Canvas, footX, footY int) {
+	drawContactShadow(c, footX, footY)
+	for dy := -4; dy <= 3; dy++ { // stone rim
+		w := int(11 * sqrtClamp(1-float64(dy*dy)/18.0))
+		for dx := -w; dx <= w; dx++ {
+			tone := canvas.Color(0x9A9A9A)
+			if dx < -w/3 {
+				tone = canvas.Color(0x686868)
+			}
+			c.Set(footX+dx, footY-5+dy, tone)
+		}
+	}
+	for dy := -3; dy <= 1; dy++ { // water surface
+		w := int(7 * sqrtClamp(1-float64(dy*dy)/10.0))
+		for dx := -w; dx <= w; dx++ {
+			c.Set(footX+dx, footY-6+dy, canvas.Color(0x39394A))
+		}
+	}
+	c.Set(footX-2, footY-7, canvas.Color(0xC6C6E0)) // glint
+	c.VLine(footX-9, footY-22, footY-7, canvas.Color(0x4A3F30))
+	c.VLine(footX+9, footY-22, footY-7, canvas.Color(0x4A3F30))
+	fillTriangle(c, [2]int{footX - 12, footY - 21}, [2]int{footX + 12, footY - 21}, [2]int{footX, footY - 31}, canvas.Color(0x8A6A4A))
+	drawRidge(c, [2]int{footX, footY - 31}, [2]int{footX - 12, footY - 21}, canvas.Color(0xB09070))
+}
+
+// drawLighthouse paints a tall banded tower with a lit lantern room and a faint
+// sweeping beam — Tidewell's seaside landmark.
+func drawLighthouse(c *canvas.Canvas, footX, footY int, t float64) {
+	drawContactShadow(c, footX, footY)
+	const H = 54
+	for y := 0; y <= H; y++ {
+		f := float64(y) / float64(H)
+		half := int(11 - 5*f) // taper toward the top
+		tone := canvas.Color(0xCACACA)
+		if (y/10)%2 == 0 {
+			tone = canvas.Color(0x8E8E8E) // painted banding
+		}
+		for dx := -half; dx <= half; dx++ {
+			col := tone
+			if dx < -half/3 {
+				col = col.Scale(0.7)
+			}
+			c.Set(footX+dx, footY-y, col)
+		}
+	}
+	top := footY - H
+	c.FillRect(footX-5, top-9, 11, 9, canvas.Color(0x363636)) // lantern room frame
+	c.FillRect(footX-3, top-7, 7, 5, canvas.Color(0xF6F4CC))  // the light
+	fillTriangle(c, [2]int{footX - 7, top - 9}, [2]int{footX + 7, top - 9}, [2]int{footX, top - 17}, canvas.Color(0x656565))
+	bx := int(16 * sinf(t*1.1)) // slow sweeping beam
+	c.HLine(footX, footX+bx, top-5, canvas.Color(0x585848))
+}
+
+// drawFence paints a low post-and-rail fence segment.
+func drawFence(c *canvas.Canvas, footX, footY int) {
+	c.VLine(footX-9, footY-11, footY-1, canvas.Color(0x5A4A38))
+	c.VLine(footX+9, footY-11, footY-1, canvas.Color(0x5A4A38))
+	c.HLine(footX-9, footX+9, footY-10, canvas.Color(0x6C5A44))
+	c.HLine(footX-9, footX+9, footY-5, canvas.Color(0x6C5A44))
+}
+
+// drawLedge paints a low earthen ledge (a single-tile drop you can hop down).
+func drawLedge(c *canvas.Canvas, px, py int) {
+	iso.DrawCube(c, px, py, 7, canvas.Color(0x3A342A), canvas.Color(0x241F18), canvas.Color(0x2E2820))
+	// A bright lip along the top-front edges reads as the drop.
+	c.HLine(px-iso.HW+2, px-1, py+iso.HH-7, canvas.Color(0x5C5242))
+	c.HLine(px+1, px+iso.HW-2, py+iso.HH-7, canvas.Color(0x5C5242))
 }
 
 // --- isometric route art (monochrome, top-lit like the plaza) ---

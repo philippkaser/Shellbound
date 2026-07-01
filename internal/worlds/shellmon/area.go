@@ -98,6 +98,44 @@ func (a *routeState) set(x, y int, t byte) {
 	}
 }
 
+// hrun/vrun/rect paint runs and blocks of a tile — used to lay roads, plazas,
+// grass patches and water on top of a plain base field.
+func (a *routeState) hrun(t byte, x0, x1, y int) {
+	for x := x0; x <= x1; x++ {
+		a.set(x, y, t)
+	}
+}
+func (a *routeState) vrun(t byte, x, y0, y1 int) {
+	for y := y0; y <= y1; y++ {
+		a.set(x, y, t)
+	}
+}
+func (a *routeState) rect(t byte, x0, y0, x1, y1 int) {
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			a.set(x, y, t)
+		}
+	}
+}
+
+// baseField builds a w×h field enclosed by trees with a short-grass ('g')
+// interior. Towns and routes both start from this and stamp features on top.
+func baseField(w, h int) []string {
+	rows := make([]string, h)
+	for y := 0; y < h; y++ {
+		b := make([]byte, w)
+		for x := 0; x < w; x++ {
+			if x == 0 || y == 0 || x == w-1 || y == h-1 {
+				b[x] = '#'
+			} else {
+				b[x] = 'g'
+			}
+		}
+		rows[y] = string(b)
+	}
+	return rows
+}
+
 // stamp clears the tiles under entities/warps to walkable ground so they sit on
 // path, and records the spawn.
 func (a *routeState) stamp() {
@@ -118,61 +156,76 @@ func (a *routeState) stamp() {
 // === the areas ===
 
 func areaOakhavenBuild() *routeState {
-	// A wide, open starting town. The east edge (col 22, row 7) is the gate out
-	// to Route 1; a path leads to it. Houses are dotted around an open green.
-	a := parseArea(areaOakhaven, "Oakhaven", []string{
-		"#######################",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,B,,,,,B,,,,,B,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,....................",
-		"#,,,,,,,,~~~,,,,,,,,,,#",
-		"#,,,,,,,,~~~,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,B,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#######################",
-	})
-	a.spawnX, a.spawnY = 10, 7
+	// Oakhaven — a cozy inland starting village: a stone wishing-well at the
+	// heart of a paved square, cottages around a tidy lawn, flower beds and a
+	// fenced paddock. Paved and lawn ground only, so nothing wild spawns here.
+	// The east gate (col 22, row 7) opens onto Route 1.
+	a := parseArea(areaOakhaven, "Oakhaven", baseField(23, 14))
+	a.spawnX, a.spawnY = 3, 7
+
+	// Roads and the central paved square.
+	a.hrun('.', 1, 21, 7)    // main road to the east gate
+	a.vrun('.', 11, 1, 12)   // north–south road
+	a.rect('.', 9, 5, 13, 9) // town square
+	a.set(11, 6, 'W')        // the wishing-well (walk around it)
+
+	// Cottages around the green.
+	for _, p := range [][2]int{{3, 2}, {8, 2}, {15, 2}, {19, 2}, {4, 11}, {18, 11}} {
+		a.set(p[0], p[1], 'B')
+	}
+	a.set(19, 4, 'H') // rest pad by the eastern cottage
+
+	// Flower beds and a little fenced paddock in the southwest.
+	for _, p := range [][2]int{{5, 4}, {16, 4}, {6, 9}, {15, 3}} {
+		a.set(p[0], p[1], 'f')
+	}
+	a.hrun('e', 3, 6, 12)
+	a.set(3, 11, 'e')
+	a.set(6, 11, 'e')
+
 	a.warps = []warp{{x: 22, y: 7, dest: areaRoute1, dx: 1, dy: 6}}
 	a.npcs = []npc{
-		{x: 4, y: 4, name: "Mom", line: "Rest your team on the well-pad (the cross) before you set out, dear.", facing: sprites.FaceDown},
-		{x: 18, y: 6, name: "Old Conch", line: "East lies Route 1. Mind the trainers lurking in the grass.", facing: sprites.FaceLeft},
+		{x: 5, y: 7, name: "Mom", line: "Rest your team on the pad by the eastern cottage before you set out, dear.", facing: sprites.FaceDown},
+		{x: 14, y: 7, name: "Old Conch", line: "East lies Route 1. Mind the trainers lurking in the tall grass.", facing: sprites.FaceRight},
 	}
 	a.signs = []sign{
-		{x: 3, y: 11, text: "Oakhaven — a quiet shell of a town."},
+		{x: 9, y: 3, text: "Oakhaven — a quiet shell of a town. Make a wish at the well!"},
 		{x: 20, y: 6, text: "Route 1 ahead. Tidewell lies beyond the grass."},
 	}
-	a.set(8, 5, 'H')   // rest/heal well-pad
-	a.set(3, 10, 'f')  // flower beds
-	a.set(17, 10, 'f') // flower beds
 	a.stamp()
 	return a
 }
 
 func areaRoute1Build() *routeState {
-	// A long, open route. Row 6 is a clear path running the full width (col 0 =
-	// west warp back to Oakhaven, col 28 = east warp on to Tidewell). Above and
-	// below the path is open tall grass framed by irregular treelines.
-	a := parseArea(areaRoute1, "Route 1", []string{
-		"#############################",
-		"#,,,,,,,#####,,,,,,#####,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		".............................",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,#####,,,,,,#####,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,,,,,,,#",
-		"#############################",
-	})
-	a.spawnX, a.spawnY = 1, 6 // only entered via warp, but keep a sane default
+	// Route 1 in the Pokémon idiom: a dirt path threads a field of short grass,
+	// past defined patches of tall grass (the only tiles that hide wild Shellmon)
+	// and a ledge you can hop down but not climb back up. Trainers watch the path
+	// from the grass. West gate (col 0, row 6) → Oakhaven; east (col 28) →
+	// Tidewell.
+	a := parseArea(areaRoute1, "Route 1", baseField(29, 13))
+	a.spawnX, a.spawnY = 1, 6
+
+	// The path: a spine across the route with a northeast spur into the ace's
+	// corner.
+	a.hrun('.', 1, 27, 6)
+	a.vrun('.', 21, 3, 6)
+	a.hrun('.', 21, 25, 3)
+
+	// Tall-grass patches (wild encounters happen only on these ',' tiles).
+	a.rect(',', 4, 2, 9, 4)    // north patch, over the path — Cole's ground
+	a.rect(',', 10, 8, 16, 10) // south patch below a ledge
+	a.rect(',', 19, 2, 25, 4)  // northeast patch — the ace trains here
+
+	// A ledge along the south edge of the path: hop down into the south grass.
+	a.hrun('j', 10, 16, 7)
+
+	// Scenery.
+	a.set(17, 4, 'o')
+	a.set(8, 10, 'o')
+	a.set(4, 10, 'f')
+	a.set(26, 3, 'f')
+	a.rect('#', 12, 1, 14, 1) // a little copse on the north treeline
+
 	a.encounters = true
 	a.lvlMin, a.lvlMax = 3, 7
 	a.wildPool = []string{"sprigling", "fernling", "dripling", "cindle", "flickit", "thornpod"}
@@ -185,61 +238,63 @@ func areaRoute1Build() *routeState {
 		{id: "r1-cole", name: "Youngster Cole", intro: "You can't sneak past me!", defeat: "Aw, my Sprigling…",
 			x: 7, y: 4, facing: sprites.FaceDown, sight: 3, team: []teamMon{{"sprigling", 4}}},
 		{id: "r1-wren", name: "Lass Wren", intro: "Let's have a quick battle!", defeat: "You're strong!",
-			x: 16, y: 8, facing: sprites.FaceUp, sight: 3, team: []teamMon{{"dripling", 4}, {"fernling", 5}}},
+			x: 13, y: 9, facing: sprites.FaceLeft, sight: 3, team: []teamMon{{"dripling", 4}, {"fernling", 5}}},
 		{id: "r1-ace", name: "Ace Mossa", intro: "So the rumors were true — a challenger!", defeat: "Take this, you've earned it.",
-			x: 24, y: 2, facing: sprites.FaceDown, sight: 2, team: []teamMon{{"flickit", 7}, {"thornpod", 7}, {"tidecoil", 9}},
+			x: 23, y: 2, facing: sprites.FaceDown, sight: 2, team: []teamMon{{"flickit", 7}, {"thornpod", 7}, {"tidecoil", 9}},
 			reward: "halo", rewardN: "Wanderer's Halo"},
 	}
 	a.signs = []sign{
 		{x: 2, y: 5, text: "ROUTE 1 — tall grass hides wild Shellmon. Press into it to find them."},
-		{x: 22, y: 4, text: "Locals whisper of an ace who trains in the northeast grass…"},
+		{x: 20, y: 5, text: "Locals whisper of an ace who trains in the northeast grass…"},
 	}
 	a.items = []hiddenItem{
-		{id: "r1-frost", x: 4, y: 9, visible: true, msg: "A lonely Frostnip tags along!", creature: "frostnip", level: 5},
-		{id: "r1-buried", x: 26, y: 9, visible: false, msg: "You dig up a buried Wizard Hat!", cosmetic: "wizard", cosmeticName: "Wizard Hat"},
+		{id: "r1-frost", x: 3, y: 7, visible: true, msg: "A lonely Frostnip tags along!", creature: "frostnip", level: 5},
+		{id: "r1-buried", x: 25, y: 2, visible: false, msg: "You dig up a buried Wizard Hat!", cosmetic: "wizard", cosmeticName: "Wizard Hat"},
 	}
-	// Scattered scenery on otherwise-grassy tiles.
-	a.set(13, 3, 'o')  // a boulder in the open
-	a.set(20, 8, 'o')  // another to the south
-	a.set(10, 9, 'f')  // a patch of flowers
-	a.set(25, 11, 'f') // flowers near the south treeline
 	a.stamp()
 	return a
 }
 
 func areaTidewellBuild() *routeState {
-	// The open seaside town at the far end of Route 1. A wide bay of water fills
-	// the south; the west edge (col 0, row 7) is the gate back to the route.
-	a := parseArea(areaTidewell, "Tidewell", []string{
-		"#######################",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,B,,,,,,,,,,,,,B,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		".....................,#",
-		"#,,,,,~~~~~~~~,,,,,,,,#",
-		"#,,,,~~~~~~~~~~,,,,,,,#",
-		"#,,,,~~~~~~~~~~,,,f,,,#",
-		"#,,,,,~~~~~~~~,,,,,,,,#",
-		"#,,,,,,,,,,,,,,,,,,,,,#",
-		"#######################",
-	})
+	// Tidewell — a breezy seaside port. A sandy bay fills the south, crossed by a
+	// wooden fishing pier, with a striped lighthouse on the eastern point.
+	// Cottages sit up on the green. West gate (col 0, row 7) → Route 1.
+	a := parseArea(areaTidewell, "Tidewell", baseField(23, 14))
 	a.spawnX, a.spawnY = 2, 7
+
+	// Waterfront: a broad sandy shore with the bay cut into it.
+	a.rect('s', 3, 8, 19, 12)
+	a.rect('~', 5, 9, 17, 12)
+	a.rect('~', 7, 8, 15, 8)
+
+	// Roads and the fishing pier reaching out over the water.
+	a.hrun('.', 1, 19, 7) // seafront road / west gate
+	a.vrun('.', 8, 1, 6)  // lane up to the cottages
+	a.vrun('P', 11, 8, 11)
+	a.set(10, 11, 'P')
+	a.set(12, 11, 'P')
+
+	// The lighthouse on the eastern point, and cottages on the green.
+	a.set(18, 9, 'L')
+	for _, p := range [][2]int{{3, 2}, {9, 2}, {15, 2}} {
+		a.set(p[0], p[1], 'B')
+	}
+	a.set(15, 4, 'H') // rest pad by a cottage
+	a.set(5, 4, 'f')
+	a.set(19, 3, 'f')
+
 	a.warps = []warp{{x: 0, y: 7, dest: areaRoute1, dx: 27, dy: 6}}
 	a.npcs = []npc{
-		{x: 17, y: 5, name: "Champion Pearl", line: "You crossed Route 1? Tidewell salutes you, traveler.", facing: sprites.FaceDown},
-		{x: 13, y: 6, name: "Sailor Finn", line: "The sea breeze carries odd whispers from the old well…", facing: sprites.FaceLeft},
+		{x: 16, y: 5, name: "Champion Pearl", line: "You crossed Route 1? Tidewell salutes you, traveler.", facing: sprites.FaceDown},
+		{x: 13, y: 7, name: "Sailor Finn", line: "The sea breeze carries odd whispers from the old well on the beach…", facing: sprites.FaceUp},
 	}
 	a.signs = []sign{
-		{x: 18, y: 6, text: "Tidewell — where the route meets the sea."},
+		{x: 5, y: 5, text: "Tidewell — where Route 1 meets the sea. Mind the pier!"},
 	}
-	// Hidden on the bank at the bay's west edge — search beside the "old well".
+	// Hidden on the west beach — search the sand beside the old well.
 	a.items = []hiddenItem{
 		{id: "tw-well", x: 4, y: 9, visible: false, msg: "Something glints in the old well — a Flower Crown!", cosmetic: "flower", cosmeticName: "Flower Crown"},
 	}
-	a.set(8, 4, 'H') // rest/heal well-pad
 	a.stamp()
 	return a
 }

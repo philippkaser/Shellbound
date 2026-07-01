@@ -22,9 +22,11 @@ const (
 
 	enemySpeed    = 0.05
 	contactRange  = 0.7
+	lungeRange    = 1.8 // an imp rears up to strike inside this range
 	contactDmg    = 7
 	hurtCoolTicks = 10
 	muzzleTicks   = 5
+	deathTicks    = 9 // frames an imp spends collapsing after a kill
 	startHealth   = 100
 	shotDamage    = 50
 	aimDot        = 0.985 // cos of the aim cone half-angle (~10°)
@@ -42,12 +44,15 @@ type enemy struct {
 	x, y  float64
 	hp    int
 	alive bool
-	hurt  int // brief flash after being hit
+	hurt  int     // brief flash after being hit
+	dying int     // collapse-and-fade countdown after a kill (0 = gone)
+	phase float64 // per-imp offset so idle bobs aren't in lockstep
 }
 
 // game is the pure FPS state; the renderer reads it but never mutates it.
 type game struct {
 	walls   [dh][dw]bool
+	torches [dh][dw]bool // wall cells bearing a lit torch
 	enemies []enemy
 
 	posX, posY     float64
@@ -58,6 +63,7 @@ type game struct {
 	kills, total int
 	hurtCool     int
 	muzzle       int
+	steps        int // move count, drives the weapon/view bob
 	state        runState
 }
 
@@ -95,13 +101,23 @@ func (g *game) build() {
 			}
 		}
 	}
-	for _, s := range [][2]float64{
+	for i, s := range [][2]float64{
 		{12.5, 7.5}, {7.5, 12.5}, {16.5, 12.5}, {12.5, 16.5}, {3.5, 21.5}, {20.5, 21.5},
 	} {
-		g.enemies = append(g.enemies, enemy{x: s[0], y: s[1], hp: 100, alive: true})
+		g.enemies = append(g.enemies, enemy{x: s[0], y: s[1], hp: 100, alive: true, phase: float64(i) * 1.7})
 	}
 	g.total = len(g.enemies)
 	g.posX, g.posY = 2.5, 2.5
+
+	// Torches bracketed along the walls — they light the hall in the portal hue.
+	for _, tc := range [][2]int{
+		{0, 6}, {0, 12}, {0, 18}, {23, 6}, {23, 12}, {23, 18},
+		{6, 0}, {12, 0}, {18, 0}, {6, 23}, {12, 23}, {18, 23},
+	} {
+		if inb(tc[0], tc[1]) {
+			g.torches[tc[1]][tc[0]] = true
+		}
+	}
 }
 
 func inb(x, y int) bool { return x >= 0 && y >= 0 && x < dw && y < dh }
@@ -124,8 +140,8 @@ func (g *game) tryMove(nx, ny float64) {
 	}
 }
 
-func (g *game) forward(d float64) { g.tryMove(g.posX+g.dirX*d, g.posY+g.dirY*d) }
-func (g *game) strafe(d float64)  { g.tryMove(g.posX+g.dirY*d, g.posY-g.dirX*d) }
+func (g *game) forward(d float64) { g.steps++; g.tryMove(g.posX+g.dirX*d, g.posY+g.dirY*d) }
+func (g *game) strafe(d float64)  { g.steps++; g.tryMove(g.posX+g.dirY*d, g.posY-g.dirX*d) }
 
 func (g *game) turn(a float64) {
 	cs, sn := math.Cos(a), math.Sin(a)
@@ -166,6 +182,7 @@ func (g *game) fire() {
 		g.enemies[best].hurt = 3
 		if g.enemies[best].hp <= 0 {
 			g.enemies[best].alive = false
+			g.enemies[best].dying = deathTicks
 			g.kills++
 		}
 	}
@@ -198,6 +215,9 @@ func (g *game) tick() {
 	for i := range g.enemies {
 		e := &g.enemies[i]
 		if !e.alive {
+			if e.dying > 0 {
+				e.dying-- // finish the collapse animation, then it's gone
+			}
 			continue
 		}
 		if e.hurt > 0 {

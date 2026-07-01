@@ -31,6 +31,7 @@ type routeState struct {
 	px, py    int
 	facing    sprites.Facing
 	lastStep  time.Time // for the walk animation
+	hopAt     time.Time // start of a ledge-hop arc
 
 	npcs     []npc
 	trainers []trainer
@@ -65,6 +66,18 @@ func (r *routeState) tile(x, y int) byte {
 		return '#'
 	}
 	return r.tiles[y*r.w+x]
+}
+
+// landAdjacent reports whether a cell borders walkable land (sand, grass, path,
+// flowers) — used to draw surf only where water meets the shore.
+func (r *routeState) landAdjacent(x, y int) bool {
+	for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		switch r.tile(x+d[0], y+d[1]) {
+		case 's', 'g', '.', 'f', ',':
+			return true
+		}
+	}
+	return false
 }
 
 // npcAt returns the NPC standing on a cell, if any.
@@ -166,12 +179,16 @@ func (m *model) keyRoute(key string) bool {
 
 	// Move: step() applies ledge hops and current sliding and returns the resting
 	// cell. If it didn't move, the way was blocked.
+	ledgeHop := r.tile(nx, ny) == 'j' && dy == 1
 	tx, ty := r.step(r.px, r.py, dx, dy)
 	if tx == r.px && ty == r.py {
 		return false
 	}
 	r.px, r.py = tx, ty
 	r.lastStep = time.Now()
+	if ledgeHop {
+		r.hopAt = time.Now()
+	}
 	m.resolveLanding()
 	return false
 }
@@ -458,6 +475,9 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 				drawFlowers(m.scr, px, py+iso.HH, x, y, t)
 			case '~':
 				drawWaterTile(m.scr, px, py, x, y, t)
+				if r.landAdjacent(x, y) {
+					drawShoreFoam(m.scr, px, py, x, y, t)
+				}
 			case 'H':
 				drawHealPad(m.scr, px, py)
 			case 's':
@@ -568,8 +588,15 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 			// The player animates like the plaza avatar (shared sprites.Pose).
 			moving := time.Since(r.lastStep) < 280*time.Millisecond
 			frame, bob := sprites.Pose(t, moving, 0)
+			// A ledge hop lifts the sprite in a short arc while the shadow stays put.
+			hop := 0
+			if !r.hopAt.IsZero() {
+				if el := time.Since(r.hopAt).Seconds(); el < 0.28 {
+					hop = -int(sinf(el/0.28*3.14159) * 12)
+				}
+			}
 			drawContactShadow(m.scr, footX, footY)
-			sprites.Draw(m.scr, footX, footY+bob, r.facing, frame, moving)
+			sprites.Draw(m.scr, footX, footY+bob+hop, r.facing, frame, moving)
 		}
 	}
 

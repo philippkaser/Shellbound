@@ -33,13 +33,14 @@ func typeColor(t mon.Type) canvas.Color {
 // hpFX eases a combatant's displayed HP toward its true value and tracks hit
 // reactions (shake) and fainting (sink), so bars tick and bodies flinch.
 type hpFX struct {
-	id      string
-	shown   float64
-	lastHP  int
-	hurtAt  time.Time
-	sinkAt  time.Time
-	fainted bool
-	init    bool
+	id       string
+	shown    float64
+	lastHP   int
+	hurtAt   time.Time
+	sinkAt   time.Time
+	appearAt time.Time
+	fainted  bool
+	init     bool
 }
 
 // sync advances the easing one frame for the active creature identified by id
@@ -48,6 +49,7 @@ func (f *hpFX) sync(id string, real, max int) {
 	if !f.init || id != f.id {
 		f.id, f.shown, f.lastHP, f.init = id, float64(real), real, true
 		f.fainted = real <= 0
+		f.appearAt, f.sinkAt = time.Now(), time.Time{}
 		return
 	}
 	if real < f.lastHP {
@@ -89,6 +91,59 @@ func (f *hpFX) sinkY() int {
 // gone reports whether a fainted creature has fully sunk (skip drawing it).
 func (f *hpFX) gone() bool {
 	return f.fainted && !f.sinkAt.IsZero() && time.Since(f.sinkAt).Seconds() > 0.6
+}
+
+// appearP is the send-out progress (0..1 over ~0.35s, then 1) used to flash a
+// creature in as it takes the field.
+func (f *hpFX) appearP() float64 {
+	if f.appearAt.IsZero() {
+		return 1
+	}
+	el := time.Since(f.appearAt).Seconds()
+	if el >= 0.35 {
+		return 1
+	}
+	return el / 0.35
+}
+
+// koP is the faint progress (0..1 over 0.6s) for the KO burst, or -1 if not
+// currently fainting.
+func (f *hpFX) koP() float64 {
+	if !f.fainted || f.sinkAt.IsZero() {
+		return -1
+	}
+	el := time.Since(f.sinkAt).Seconds()
+	if el > 0.6 {
+		return -1
+	}
+	return el / 0.6
+}
+
+// drawSendFlash bursts a bright ring where a creature takes the field.
+func drawSendFlash(c *canvas.Canvas, cx, cy int, p float64, col canvas.Color) {
+	k := 1 - p
+	add(c, cx, cy, int(6+14*k), fxBright.Scale(0.5*k))
+	rad := 8 + p*30
+	const steps = 24
+	for s := 0; s < steps; s++ {
+		ang := float64(s) / steps * 2 * math.Pi
+		x := cx + int(math.Cos(ang)*rad)
+		y := cy + int(math.Sin(ang)*rad*0.6)
+		set(c, x, y, col.Scale(0.9*k))
+	}
+}
+
+// drawKOBurst puffs motes up and outward as a fainted creature drops.
+func drawKOBurst(c *canvas.Canvas, cx, cy int, p float64, col canvas.Color) {
+	k := 1 - p
+	for i := 0; i < 10; i++ {
+		ang := float64(i)/10*2*math.Pi + 0.3
+		d := 6 + p*30
+		x := cx + int(math.Cos(ang)*d)
+		y := cy + int(math.Sin(ang)*d*0.5) - int(p*10) // drift upward
+		set(c, x, y, fxBright.Scale(k))
+		set(c, x, y+1, col.Scale(0.7*k))
+	}
 }
 
 // battleAnim sequences the per-turn move effects: when the turn counter ticks,

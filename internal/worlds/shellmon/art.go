@@ -251,6 +251,26 @@ func abs2(a int) int {
 }
 
 // drawHealPad paints the well/rest pad: a pale diamond with a bright cross.
+// drawShoreFoam traces a pulsing line of surf along a water tile's near edges —
+// drawn where water meets land so the coastline feels alive.
+func drawShoreFoam(c *canvas.Canvas, px, py, x, y int, t float64) {
+	seed := x*7 + y*11
+	for i := 0; i <= iso.HW; i++ {
+		frac := float64(i) / float64(iso.HW)
+		yy := int(float64(iso.HH) * frac)
+		swell := sinf(t*2.2 + float64(seed) + frac*6)
+		if swell < 0.4 {
+			continue
+		}
+		tone := canvas.Color(0x9FB0C0)
+		if swell > 0.82 {
+			tone = canvas.Color(0xE6EEF4)
+		}
+		c.Set(px-i, py+yy, tone) // upper-left edge
+		c.Set(px+i, py+yy, tone) // upper-right edge
+	}
+}
+
 func drawHealPad(c *canvas.Canvas, px, py int) {
 	iso.DrawDiamond(c, px, py, canvas.Color(0x2E2E2E), canvas.Color(0x565656))
 	cx, cy := px, py+iso.HH

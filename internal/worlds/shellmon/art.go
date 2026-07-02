@@ -26,9 +26,9 @@ func groundGrass(c *canvas.Canvas, px, py, x, y int) {
 // speckle but no tall swaying blades, so towns don't read as wild-encounter
 // grass. Also used as the natural floor under trees, rocks and ledges.
 func groundLawn(c *canvas.Canvas, px, py, x, y int) {
-	fill := canvas.Color(0x1B1F1B)
+	fill := canvas.Color(0x1D1D1D)
 	if (x+y)&1 == 0 {
-		fill = canvas.Color(0x202420)
+		fill = canvas.Color(0x222222)
 	}
 	iso.DrawDiamond(c, px, py, fill, routeEdge)
 	cx, cy := px, py+iso.HH
@@ -36,32 +36,32 @@ func groundLawn(c *canvas.Canvas, px, py, x, y int) {
 	for i := 0; i < 4; i++ {
 		bx := cx - 12 + ((seed + i*7) % 24)
 		by := cy - 5 + ((seed + i*5) % 9)
-		c.Set(bx, by, canvas.Color(0x2C302C))
+		c.Set(bx, by, canvas.Color(0x2E2E2E))
 	}
 }
 
 // groundSand paints a pale, grainy shore tile.
 func groundSand(c *canvas.Canvas, px, py, x, y int) {
-	fill := canvas.Color(0x2B2A26)
+	fill := canvas.Color(0x2A2A2A)
 	if (x+y)&1 == 0 {
-		fill = canvas.Color(0x33322C)
+		fill = canvas.Color(0x323232)
 	}
-	iso.DrawDiamond(c, px, py, fill, canvas.Color(0x1A1914))
+	iso.DrawDiamond(c, px, py, fill, canvas.Color(0x191919))
 	cx, cy := px, py+iso.HH
 	seed := x*5 + y*11
 	for i := 0; i < 3; i++ {
 		gx := cx - 11 + ((seed + i*9) % 22)
 		gy := cy - 4 + ((seed + i*6) % 8)
-		c.Set(gx, gy, canvas.Color(0x3E3C34))
+		c.Set(gx, gy, canvas.Color(0x3C3C3C))
 	}
 }
 
 // drawPierTile paints a wooden plank walkway sitting over water.
 func drawPierTile(c *canvas.Canvas, px, py, x, y int) {
-	iso.DrawDiamond(c, px, py, canvas.Color(0x141420), canvas.Color(0x0E0E16)) // water at the edges
-	wood := canvas.Color(0x3A322A)
+	iso.DrawDiamond(c, px, py, canvas.Color(0x151515), canvas.Color(0x0F0F0F)) // water at the edges
+	wood := canvas.Color(0x333333)
 	if (x+y)&1 == 0 {
-		wood = canvas.Color(0x453B30)
+		wood = canvas.Color(0x3D3D3D)
 	}
 	cx, cy := px, py+iso.HH
 	for dy := -6; dy <= 6; dy++ {
@@ -70,8 +70,8 @@ func drawPierTile(c *canvas.Canvas, px, py, x, y int) {
 			c.Set(cx+dx, cy+dy, wood)
 		}
 	}
-	c.HLine(cx-11, cx+11, cy-2, canvas.Color(0x2A241E)) // plank seams
-	c.HLine(cx-11, cx+11, cy+2, canvas.Color(0x2A241E))
+	c.HLine(cx-11, cx+11, cy-2, canvas.Color(0x252525)) // plank seams
+	c.HLine(cx-11, cx+11, cy+2, canvas.Color(0x252525))
 }
 
 // drawWell paints a little stone wishing-well: a round rim over water with a
@@ -91,14 +91,14 @@ func drawWell(c *canvas.Canvas, footX, footY int) {
 	for dy := -3; dy <= 1; dy++ { // water surface
 		w := int(7 * sqrtClamp(1-float64(dy*dy)/10.0))
 		for dx := -w; dx <= w; dx++ {
-			c.Set(footX+dx, footY-6+dy, canvas.Color(0x39394A))
+			c.Set(footX+dx, footY-6+dy, canvas.Color(0x3B3B3B))
 		}
 	}
-	c.Set(footX-2, footY-7, canvas.Color(0xC6C6E0)) // glint
-	c.VLine(footX-9, footY-22, footY-7, canvas.Color(0x4A3F30))
-	c.VLine(footX+9, footY-22, footY-7, canvas.Color(0x4A3F30))
-	fillTriangle(c, [2]int{footX - 12, footY - 21}, [2]int{footX + 12, footY - 21}, [2]int{footX, footY - 31}, canvas.Color(0x8A6A4A))
-	drawRidge(c, [2]int{footX, footY - 31}, [2]int{footX - 12, footY - 21}, canvas.Color(0xB09070))
+	c.Set(footX-2, footY-7, canvas.Color(0xC9C9C9)) // glint
+	c.VLine(footX-9, footY-22, footY-7, canvas.Color(0x414141))
+	c.VLine(footX+9, footY-22, footY-7, canvas.Color(0x414141))
+	fillTriangle(c, [2]int{footX - 12, footY - 21}, [2]int{footX + 12, footY - 21}, [2]int{footX, footY - 31}, canvas.Color(0x707070))
+	drawRidge(c, [2]int{footX, footY - 31}, [2]int{footX - 12, footY - 21}, canvas.Color(0x969696))
 }
 
 // drawLighthouse paints a tall banded tower with a lit lantern room and a faint
@@ -123,26 +123,26 @@ func drawLighthouse(c *canvas.Canvas, footX, footY int, t float64) {
 	}
 	top := footY - H
 	c.FillRect(footX-5, top-9, 11, 9, canvas.Color(0x363636)) // lantern room frame
-	c.FillRect(footX-3, top-7, 7, 5, canvas.Color(0xF6F4CC))  // the light
+	c.FillRect(footX-3, top-7, 7, 5, canvas.Color(0xF0F0F0))  // the light
 	fillTriangle(c, [2]int{footX - 7, top - 9}, [2]int{footX + 7, top - 9}, [2]int{footX, top - 17}, canvas.Color(0x656565))
 	bx := int(16 * sinf(t*1.1)) // slow sweeping beam
-	c.HLine(footX, footX+bx, top-5, canvas.Color(0x585848))
+	c.HLine(footX, footX+bx, top-5, canvas.Color(0x565656))
 }
 
 // drawFence paints a low post-and-rail fence segment.
 func drawFence(c *canvas.Canvas, footX, footY int) {
-	c.VLine(footX-9, footY-11, footY-1, canvas.Color(0x5A4A38))
-	c.VLine(footX+9, footY-11, footY-1, canvas.Color(0x5A4A38))
-	c.HLine(footX-9, footX+9, footY-10, canvas.Color(0x6C5A44))
-	c.HLine(footX-9, footX+9, footY-5, canvas.Color(0x6C5A44))
+	c.VLine(footX-9, footY-11, footY-1, canvas.Color(0x4D4D4D))
+	c.VLine(footX+9, footY-11, footY-1, canvas.Color(0x4D4D4D))
+	c.HLine(footX-9, footX+9, footY-10, canvas.Color(0x5D5D5D))
+	c.HLine(footX-9, footX+9, footY-5, canvas.Color(0x5D5D5D))
 }
 
 // drawLedge paints a low earthen ledge (a single-tile drop you can hop down).
 func drawLedge(c *canvas.Canvas, px, py int) {
-	iso.DrawCube(c, px, py, 7, canvas.Color(0x3A342A), canvas.Color(0x241F18), canvas.Color(0x2E2820))
+	iso.DrawCube(c, px, py, 7, canvas.Color(0x353535), canvas.Color(0x202020), canvas.Color(0x292929))
 	// A bright lip along the top-front edges reads as the drop.
-	c.HLine(px-iso.HW+2, px-1, py+iso.HH-7, canvas.Color(0x5C5242))
-	c.HLine(px+1, px+iso.HW-2, py+iso.HH-7, canvas.Color(0x5C5242))
+	c.HLine(px-iso.HW+2, px-1, py+iso.HH-7, canvas.Color(0x535353))
+	c.HLine(px+1, px+iso.HW-2, py+iso.HH-7, canvas.Color(0x535353))
 }
 
 // --- isometric route art (monochrome, top-lit like the plaza) ---
@@ -215,9 +215,9 @@ func drawRock(c *canvas.Canvas, baseX, baseY int) {
 func drawWaterTile(c *canvas.Canvas, px, py, x, y int, t float64) {
 	shade := 0.5 + 0.4*sinf(float64(x*5+y*7)+t*2.2)
 	g := uint8(26 + 32*shade)
-	iso.DrawDiamond(c, px, py, canvas.RGB(g, g, g+10), canvas.Color(0x0E0E16))
+	iso.DrawDiamond(c, px, py, canvas.RGB(g, g, g+10), canvas.Color(0x0F0F0F))
 	if shade > 0.78 { // a drifting glint
-		c.Set(px, py+iso.HH-2, canvas.Color(0xC8C8E0))
+		c.Set(px, py+iso.HH-2, canvas.Color(0xCBCBCB))
 	}
 }
 
@@ -233,7 +233,7 @@ func drawCurrentTile(c *canvas.Canvas, px, py, x, y int, t byte, tm float64) {
 		ox := cdx * (drift - 5)
 		oy := cdy * (drift - 5)
 		bx, by := cx+ox, cy+oy
-		tone := canvas.Color(0xBFBFD0)
+		tone := canvas.Color(0xC1C1C1)
 		// A small ">"-style chevron pointing along (cdx, cdy).
 		for k := -2; k <= 2; k++ {
 			ax := bx + cdy*k + cdx*(-abs2(k))
@@ -262,9 +262,9 @@ func drawShoreFoam(c *canvas.Canvas, px, py, x, y int, t float64) {
 		if swell < 0.4 {
 			continue
 		}
-		tone := canvas.Color(0x9FB0C0)
+		tone := canvas.Color(0xADADAD)
 		if swell > 0.82 {
-			tone = canvas.Color(0xE6EEF4)
+			tone = canvas.Color(0xECECEC)
 		}
 		c.Set(px-i, py+yy, tone) // upper-left edge
 		c.Set(px+i, py+yy, tone) // upper-right edge
@@ -301,9 +301,9 @@ func drawHouse(c *canvas.Canvas, vx, vy int) {
 	for dx := 8; dx <= 16; dx++ {
 		b := rightEdge(dx)
 		for y := b - 16; y < b; y++ {
-			c.Set(vx+dx, y, canvas.Color(0x2A2421))
+			c.Set(vx+dx, y, canvas.Color(0x252525))
 		}
-		c.Set(vx+dx, b-16, canvas.Color(0x4A3F38)) // lintel
+		c.Set(vx+dx, b-16, canvas.Color(0x414141)) // lintel
 	}
 	c.Set(vx+15, rightEdge(15)-8, canvas.Color(0xE0E0E0)) // knob
 
@@ -351,9 +351,9 @@ func drawHouse(c *canvas.Canvas, vx, vy int) {
 // diamond top vertex is at (vx, vy): a plain isometric cube in cool stone tones.
 func drawWall(c *canvas.Canvas, vx, vy int) {
 	iso.DrawCube(c, vx, vy, 24,
-		canvas.Color(0x8C8C94), // top
-		canvas.Color(0x50505A), // left face
-		canvas.Color(0x6C6C76)) // right face
+		canvas.Color(0x8D8D8D), // top
+		canvas.Color(0x515151), // left face
+		canvas.Color(0x6D6D6D)) // right face
 }
 
 // drawGym paints a prominent civic building: a tall isometric hall with a
@@ -370,10 +370,10 @@ func drawGym(c *canvas.Canvas, vx, vy int) {
 	for dx := 6; dx <= 18; dx++ {
 		b := rightEdge(dx)
 		for y := b - 20; y < b; y++ {
-			c.Set(vx+dx, y, canvas.Color(0x24201C))
+			c.Set(vx+dx, y, canvas.Color(0x212121))
 		}
 	}
-	c.VLine(vx+12, rightEdge(12)-20, rightEdge(12)-1, canvas.Color(0x0E0C0A)) // door split
+	c.VLine(vx+12, rightEdge(12)-20, rightEdge(12)-1, canvas.Color(0x0C0C0C)) // door split
 
 	// A big gabled roof with a pediment, plus a banner ridge.
 	topY := vy - wallH
@@ -482,11 +482,11 @@ func sgn(a int) int {
 
 // drawSign paints a small wooden signpost.
 func drawSign(c *canvas.Canvas, footX, footY int) {
-	c.FillRect(footX-1, footY-13, 2, 13, canvas.Color(0x554636))  // post
-	c.FillRect(footX-7, footY-22, 15, 10, canvas.Color(0x8A7654)) // board
-	c.Rect(footX-7, footY-22, 15, 10, canvas.Color(0x3C3026))
-	c.HLine(footX-4, footX+4, footY-18, canvas.Color(0x3C3026)) // "text"
-	c.HLine(footX-4, footX+2, footY-15, canvas.Color(0x3C3026))
+	c.FillRect(footX-1, footY-13, 2, 13, canvas.Color(0x494949))  // post
+	c.FillRect(footX-7, footY-22, 15, 10, canvas.Color(0x787878)) // board
+	c.Rect(footX-7, footY-22, 15, 10, canvas.Color(0x323232))
+	c.HLine(footX-4, footX+4, footY-18, canvas.Color(0x323232)) // "text"
+	c.HLine(footX-4, footX+2, footY-15, canvas.Color(0x323232))
 }
 
 // drawItemBall paints a small bobbing pickup sphere with a band and glint.
@@ -518,7 +518,7 @@ func drawIsoTree(c *canvas.Canvas, baseX, baseY, seed int) {
 			c.Set(baseX+dx, yy, c.At(baseX+dx, yy).Scale(0.6))
 		}
 	}
-	c.FillRect(baseX-2, baseY-18, 4, 18, canvas.Color(0x3A2F2A)) // trunk
+	c.FillRect(baseX-2, baseY-18, 4, 18, canvas.Color(0x323232)) // trunk
 	// Canopy: overlapping top-lit blobs. The seed jitters radii and offsets
 	// and picks one of three silhouettes, so a treeline reads as a forest
 	// instead of one tree stamped on repeat.

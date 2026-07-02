@@ -18,18 +18,32 @@ const (
 // menu actions, in 2×2 grid order.
 var menuItems = []string{"Fight", "Catch", "Switch", "Run"}
 
+// battleOutcome is how a battle ended, driving the post-battle flow
+// (heal-on-loss, badge award). An explicit enum instead of matching the
+// result string, which is display copy.
+type battleOutcome int
+
+const (
+	outOngoing battleOutcome = iota
+	outWon
+	outLost
+	outFled
+	outCaught
+)
+
 // battleUI is the per-battle interaction state on top of the engine.
 type battleUI struct {
-	b      *mon.Battle
-	wild   bool
-	sub    battleSub
-	menu   int // 0..3
-	move   int
-	swap   int
-	forced bool // a faint forced the switch (can't back out)
-	log    []string
-	result string // outcome shown on the subOver screen
-	won    bool
+	b       *mon.Battle
+	wild    bool
+	sub     battleSub
+	menu    int // 0..3
+	move    int
+	swap    int
+	forced  bool // a faint forced the switch (can't back out)
+	log     []string
+	result  string // outcome copy shown on the subOver screen
+	outcome battleOutcome
+	won     bool
 
 	// trainer battles (empty for wild encounters)
 	trainerID   string
@@ -137,6 +151,7 @@ func (m *model) chooseMenu(item int) {
 		if bt.wild {
 			bt.log = appendLog(bt.log, "You fled the battle.")
 			bt.result = "You got away safely."
+			bt.outcome = outFled
 			bt.won = false
 			bt.sub = subOver
 		} else {
@@ -227,10 +242,12 @@ func (m *model) attemptCatch() {
 	foe := bt.b.Active(false)
 	bt.log = appendLog(bt.log, "You toss a shell at "+foe.Name()+"…")
 	if m.rng.Float64() < mon.CatchChance(foe) {
+		foe.Heal() // a caught creature joins the team rested, not battle-worn
 		m.roster = append(m.roster, foe)
 		m.saveRoster()
 		bt.log = appendLog(bt.log, "Gotcha! "+foe.Name()+" was caught!")
 		bt.result = foe.Name() + " joined your team!"
+		bt.outcome = outCaught
 		bt.won = true
 		bt.sub = subOver
 		return
@@ -246,6 +263,7 @@ func (m *model) afterTurn() {
 	if bt.b.Done() {
 		if bt.b.WinnerA() {
 			bt.won = true
+			bt.outcome = outWon
 			bt.result = "You won the battle!"
 			m.awardXP()
 			if !bt.wild && bt.trainerID != "" && !m.defeated[bt.trainerID] {
@@ -265,11 +283,22 @@ func (m *model) afterTurn() {
 			}
 		} else {
 			bt.won = false
+			bt.outcome = outLost
 			bt.result = "Your team was overwhelmed…"
 		}
 		m.saveRoster()
 		bt.sub = subOver
 		return
+	}
+	// The AI's fainted creature must be replaced here — the engine only
+	// resolves switches submitted as actions, so without this a trainer's
+	// reserves never take the field and the battle can never end.
+	if bt.b.NeedsSwitch(false) {
+		// XP for the KO lands now, per fainted foe, not only at battle end.
+		m.awardXP()
+		ev := bt.b.ApplyForcedSwitch(false, bt.b.BestSwitch(false))
+		bt.log = appendLog(bt.log, ev...)
+		// The hpFX identity change plays the send-in flash on its own.
 	}
 	if bt.b.NeedsSwitch(true) {
 		bt.forced = true
@@ -295,7 +324,7 @@ func (m *model) awardXP() {
 func (m *model) finishBattle() {
 	wonBadge, badge := false, ""
 	if m.bt != nil {
-		if !m.bt.won && m.bt.result != "You got away safely." && !m.partyAlive() {
+		if m.bt.outcome == outLost && !m.partyAlive() {
 			m.healParty()
 		}
 		wonBadge, badge = m.bt.wonBadge, m.bt.badge
@@ -339,11 +368,13 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	// Backdrop: a graded sky, parallax ridges, clouds and a lit ground.
 	drawArena(m.scr, pw, ph, t)
 
-	// Advance the HP-bar easing and hit/faint reactions for both sides.
+	// Advance the HP-bar easing and hit/faint reactions for both sides. The
+	// FX identity is the team slot plus species — display names collide for
+	// duplicate unnicknamed creatures, which would skip send-in resets.
 	foe := bt.b.Active(false)
 	you := bt.b.Active(true)
-	m.foeFX.sync(foe.Name(), foe.CurHP, foe.MaxHP())
-	m.youFX.sync(you.Name(), you.CurHP, you.MaxHP())
+	m.foeFX.sync(fxID(bt.b.ActiveIndex(false), foe), foe.CurHP, foe.MaxHP())
+	m.youFX.sync(fxID(bt.b.ActiveIndex(true), you), you.CurHP, you.MaxHP())
 
 	// A winner does a little celebratory bob on the results screen.
 	vbob := 0

@@ -112,10 +112,13 @@ type MoveView struct {
 	Power int
 }
 
-// Combatant is the on-field creature as the UI shows it.
+// Combatant is the on-field creature as the UI shows it. Slot is its team
+// index — combined with Species it identifies the individual, which display
+// names can't (duplicate unnicknamed creatures share a name).
 type Combatant struct {
 	Name    string
 	Species string
+	Slot    int
 	Level   int
 	HP      int
 	MaxHP   int
@@ -162,8 +165,8 @@ func (m *Match) Snapshot(sideA bool) View {
 	defer m.mu.Unlock()
 
 	v := View{
-		You:      combatant(m.b.Active(sideA)),
-		Foe:      combatant(m.b.Active(!sideA)),
+		You:      combatant(m.b.Active(sideA), m.b.ActiveIndex(sideA)),
+		Foe:      combatant(m.b.Active(!sideA), m.b.ActiveIndex(!sideA)),
 		YouAlive: m.b.AliveCount(sideA),
 		FoeAlive: m.b.AliveCount(!sideA),
 		FoeTotal: len(m.b.Team(!sideA)),
@@ -199,8 +202,8 @@ func (m *Match) Snapshot(sideA bool) View {
 	return v
 }
 
-func combatant(c *Creature) Combatant {
-	cb := Combatant{Name: c.Name(), Species: c.Species, Level: c.Level, HP: c.CurHP, MaxHP: c.MaxHP(), Type: c.Type()}
+func combatant(c *Creature, slot int) Combatant {
+	cb := Combatant{Name: c.Name(), Species: c.Species, Slot: slot, Level: c.Level, HP: c.CurHP, MaxHP: c.MaxHP(), Type: c.Type()}
 	for _, mk := range c.Moves {
 		if mv, ok := moves[mk]; ok {
 			cb.Moves = append(cb.Moves, MoveView{Name: mv.Name, Type: mv.Type, Power: mv.Power})

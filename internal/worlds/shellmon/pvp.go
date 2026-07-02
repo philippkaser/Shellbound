@@ -3,6 +3,7 @@ package shellmon
 import (
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,11 +35,13 @@ type pvpModel struct {
 	termW, termH int
 	start        time.Time
 
-	sub     battleSub // menu / move / switch (meaningful only while it's our turn)
-	menu    int
-	move    int
-	swap    int
-	exiting bool
+	sub  battleSub // menu / move / switch (meaningful only while it's our turn)
+	menu int
+	move int
+	swap int
+	// exiting is set from both the tea loop (leave) and the app-teardown
+	// goroutine (Stop), so it must be atomic.
+	exiting atomic.Bool
 
 	youFX hpFX
 	foeFX hpFX
@@ -83,7 +86,7 @@ func pvpTick() tea.Cmd {
 
 // Stop lets the app halt the model's ticker on teardown (matches the world's
 // interface{ Stop() } hook).
-func (m *pvpModel) Stop() { m.exiting = true }
+func (m *pvpModel) Stop() { m.exiting.Store(true) }
 
 // Update implements tea.Model.
 func (m *pvpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -94,7 +97,7 @@ func (m *pvpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case pvpTickMsg:
 		m.render()
-		if m.exiting {
+		if m.exiting.Load() {
 			return m, nil
 		}
 		return m, pvpTick()
@@ -222,16 +225,13 @@ func (m *pvpModel) firstSwitchable(v mon.View) int {
 }
 
 func (m *pvpModel) leave() {
-	if !m.exiting {
-		m.exiting = true
-		if m.exit != nil {
-			m.exit()
-		}
+	if m.exiting.CompareAndSwap(false, true) && m.exit != nil {
+		m.exit()
 	}
 }
 
 func (m *pvpModel) render() {
-	if m.exiting || m.out == nil {
+	if m.exiting.Load() || m.out == nil {
 		return
 	}
 	if m.start.IsZero() {
@@ -268,9 +268,10 @@ func (m *pvpModel) draw(pw, ph int, t float64) {
 	banner := "vs " + m.opponent
 	m.scr.DrawText(pw/2-canvas.TextWidth(banner)/2, 14, banner, uiDim)
 
-	// Advance HP easing + hit/faint reactions and the per-turn effects.
-	m.foeFX.sync(v.Foe.Name, v.Foe.HP, v.Foe.MaxHP)
-	m.youFX.sync(v.You.Name, v.You.HP, v.You.MaxHP)
+	// Advance HP easing + hit/faint reactions and the per-turn effects. FX
+	// identity is slot+species (names collide for duplicate creatures).
+	m.foeFX.sync(itoa(v.Foe.Slot)+":"+v.Foe.Species, v.Foe.HP, v.Foe.MaxHP)
+	m.youFX.sync(itoa(v.You.Slot)+":"+v.You.Species, v.You.HP, v.You.MaxHP)
 	m.anim.trigger(v.TurnSeq, v.YouLastType, v.YouCast, v.FoeLastType, v.FoeCast)
 
 	// Foe (upper-right).

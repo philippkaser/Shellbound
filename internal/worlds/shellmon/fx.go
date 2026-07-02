@@ -30,6 +30,12 @@ func typeColor(t mon.Type) canvas.Color {
 	}
 }
 
+// fxID is the identity an hpFX tracks: the team slot plus species. Display
+// names alone collide for duplicate unnicknamed creatures of one species.
+func fxID(slot int, c *mon.Creature) string {
+	return itoa(slot) + ":" + c.Species
+}
+
 // hpFX eases a combatant's displayed HP toward its true value and tracks hit
 // reactions (shake) and fainting (sink), so bars tick and bodies flinch.
 type hpFX struct {

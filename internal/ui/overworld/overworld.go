@@ -28,6 +28,7 @@ import (
 	"github.com/shellbound/shellbound/internal/ui/cosmetics"
 	"github.com/shellbound/shellbound/internal/ui/friends"
 	"github.com/shellbound/shellbound/internal/ui/inventory"
+	"github.com/shellbound/shellbound/internal/ui/listpanel"
 	"github.com/shellbound/shellbound/internal/ui/shop"
 	"github.com/shellbound/shellbound/internal/ui/toast"
 )
@@ -270,7 +271,7 @@ func New(
 		inv:      inventory.New(theme),
 		wardrobe: cosmetics.New(theme),
 		shop:     shop.New(theme),
-		toasts:   toast.New(theme),
+		toasts:   toast.New(),
 		unread:   make(map[int64]string),
 		emotes:   make(map[int64]emoteState),
 
@@ -309,31 +310,35 @@ func (m *Model) publish() {
 		cosmetic: m.player.Cosmetic, emote: m.activeEmote(m.player.ID),
 	})
 
-	var panel []string
+	var panel listpanel.Content
+	panel.Cursor = -1
 	switch {
 	case m.friends.IsOpen():
-		panel = m.friends.Lines()
+		panel = m.friends.Content()
 	case m.inv.IsOpen():
-		panel = m.inv.Lines()
+		panel = m.inv.Content()
 	case m.wardrobe.IsOpen():
-		panel = m.wardrobe.Lines()
+		panel = m.wardrobe.Content()
 	case m.shop.IsOpen():
-		panel = m.shop.Lines()
+		panel = m.shop.Content()
 	case m.emoteMenu:
-		panel = emoteMenuLines()
+		panel = emoteMenuContent()
 	case m.inspecting != nil:
-		panel = m.inspectLines()
+		panel = m.inspectContent()
 	case m.challenge != nil:
-		panel = []string{
-			"Battle Challenge", "",
-			m.challenge.name + " wants to duel!",
-			"(your full team, healed)", "",
-			"y accept   n decline",
+		panel = listpanel.Content{
+			Title: "Battle Challenge",
+			Lines: []string{
+				m.challenge.name + " wants to duel!",
+				"(your full team, healed)",
+			},
+			Cursor: -1,
+			Footer: "y accept   n decline",
 		}
 	}
 
 	// Contextual bottom-of-screen nudges, only when nothing holds focus.
-	idle := !m.chat.IsOpen() && len(panel) == 0
+	idle := !m.chat.IsOpen() && panel.Empty()
 	shopPrompt := idle && m.world.NearShop(m.px, m.py/2)
 	interactPrompt := ""
 	if idle {
@@ -345,9 +350,12 @@ func (m *Model) publish() {
 	var unreadName string
 	var unreadN int
 	if len(m.unread) > 0 && !m.friends.IsOpen() {
+		// Pick the alphabetically-first sender so the badge doesn't flicker
+		// between names on map-iteration order frame to frame.
 		for _, n := range m.unread {
-			unreadName = n
-			break
+			if unreadName == "" || n < unreadName {
+				unreadName = n
+			}
 		}
 		unreadN = len(m.unread) - 1
 	}
@@ -380,7 +388,7 @@ func (m *Model) publish() {
 		players: players, selfID: m.player.ID,
 		chat:           append([]chat.Entry(nil), m.chat.History()...),
 		toast:          m.toasts.Message(),
-		panelLines:     panel,
+		panel:          panel,
 		chatInput:      chatInput,
 		chatOpen:       m.chat.IsOpen(),
 		unreadName:     unreadName,
@@ -621,6 +629,16 @@ func (m Model) pressMove(dx, dy int, run bool) (Model, tea.Cmd) {
 	}
 }
 
+// uiFocused reports whether any panel/overlay owns the keyboard — the single
+// source of truth for "movement keys must not walk the avatar". Keep every
+// panel here: an omission (the wardrobe once was) lets a live move-tick chain
+// keep stepping behind an open panel.
+func (m Model) uiFocused() bool {
+	return m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() ||
+		m.wardrobe.IsOpen() || m.shop.IsOpen() || m.emoteMenu ||
+		m.inspecting != nil || m.challenge != nil
+}
+
 // tickMove is one beat of the held-walk chain: it steps in the current
 // direction while the key is still live, and otherwise stops and goes idle.
 func (m Model) tickMove() (Model, tea.Cmd) {
@@ -628,7 +646,7 @@ func (m Model) tickMove() (Model, tea.Cmd) {
 		return m, nil
 	}
 	// A panel or the chat console stole focus — stop walking.
-	if m.chat.IsOpen() || m.inv.IsOpen() || m.friends.IsOpen() || m.shop.IsOpen() || m.emoteMenu || m.inspecting != nil || m.challenge != nil {
+	if m.uiFocused() {
 		return m.stopWalk(), nil
 	}
 	window := tapWindow
@@ -795,13 +813,15 @@ func (m Model) updateEmoteMenu(key tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// emoteMenuLines is the quick-picker panel content for the renderer.
-func emoteMenuLines() []string {
-	out := []string{"Emotes", ""}
-	for i, e := range emote.All() {
-		out = append(out, "  "+strconv.Itoa(i+1)+"  "+e.Verb)
+// emoteMenuContent is the quick-picker panel content for the renderer.
+func emoteMenuContent() listpanel.Content {
+	all := emote.All()
+	c := listpanel.Content{Title: "Emotes", Cursor: -1}
+	for i, e := range all {
+		c.Lines = append(c.Lines, "  "+strconv.Itoa(i+1)+"  "+e.Verb)
 	}
-	return append(out, "", "1-8 play  Esc close")
+	c.Footer = "1-" + strconv.Itoa(len(all)) + " play  Esc close"
+	return c
 }
 
 func abs(v int) int {
@@ -916,19 +936,19 @@ func (m Model) updateChallenge(key tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// inspectLines is the card content for the renderer.
-func (m Model) inspectLines() []string {
+// inspectContent is the card content for the renderer.
+func (m Model) inspectContent() listpanel.Content {
 	c := m.inspecting
-	out := []string{c.name, ""}
+	out := listpanel.Content{Title: c.name, Cursor: -1, Footer: "w whisper · f friend · v duel · Esc close"}
 	wearing := "wearing: " + c.cosmeticName
 	if c.cosmeticTier != "" {
 		wearing += " (" + c.cosmeticTier + ")"
 	}
-	out = append(out, wearing)
+	out.Lines = append(out.Lines, wearing)
 	if c.since != "" {
-		out = append(out, "wandering since "+c.since)
+		out.Lines = append(out.Lines, "wandering since "+c.since)
 	}
-	return append(out, "", "w whisper · f friend · v duel · Esc close")
+	return out
 }
 
 // ownedCosmetics returns the set of unlockable cosmetic keys the player owns,

@@ -62,9 +62,27 @@ var Portals = []Portal{
 	{Key: "doom", Name: "Doom", X: 51, Y: 3},
 }
 
+// portalHues memoizes PortalHue for the registered portals: the hash is
+// stable and RenderIso asks for it every frame on every session's render
+// goroutine. Written once at init, read-only after.
+var portalHues = func() map[string]float64 {
+	m := make(map[string]float64, len(Portals))
+	for _, p := range Portals {
+		m[p.Key] = portalHue(p.Key)
+	}
+	return m
+}()
+
 // PortalHue maps a world key to a stable base hue in [0, 360). A given world
 // always shimmers in the same color.
 func PortalHue(key string) float64 {
+	if h, ok := portalHues[key]; ok {
+		return h
+	}
+	return portalHue(key)
+}
+
+func portalHue(key string) float64 {
 	sum := sha256.Sum256([]byte(key))
 	return float64(int(sum[0])<<8|int(sum[1])) * 360 / 65536
 }
@@ -169,6 +187,17 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 		}
 	}
 
+	// A faint column of the portal's light rises from the pool — a landmark
+	// visible across the plaza. Sparse dithered vertical streaks, brightest
+	// near the surface, fading with height, swaying gently.
+	drawBeam(c, ax, cy, baseHue, t)
+
+	// A ring of standing stones around the pool turns the puddle into a
+	// gateway: plain monochrome monoliths (the world stays grey; only the
+	// pool and its light carry color), the back rank drawn behind the pool's
+	// own paint order since the pool never overlaps their tops.
+	drawStones(c, ax, cy)
+
 	// A few fat motes of the portal's light drift up from the pool and fade — a
 	// gentle particle effect that hints the gateway is alive.
 	drawParticles(c, ax, cy, baseHue, t)
@@ -176,6 +205,70 @@ func (p Portal) RenderIso(c *canvas.Canvas, t, originSx, originSy float64) {
 	// Name label, centered beneath, white with a black shadow for legibility.
 	lw := canvas.TextWidth(p.Name)
 	c.DrawTextShadow(ax-lw/2, cy+orbHalfH+6, p.Name, 0xFFFFFF, 0x000000)
+}
+
+// drawBeam paints the portal's rising light column: dithered additive
+// streaks in the portal's hue, so the gateway reads from across the plaza.
+func drawBeam(c *canvas.Canvas, ax, cy int, baseHue, t float64) {
+	const beamH = 88
+	sway := math.Sin(t*0.7) * 3
+	for dy := 0; dy < beamH; dy++ {
+		y := cy - 6 - dy
+		fade := 1 - float64(dy)/beamH
+		fade *= fade // quadratic: bright at the pool, whisper at the top
+		halfW := 10 - dy/12
+		if halfW < 3 {
+			halfW = 3
+		}
+		off := int(sway * float64(dy) / beamH * 2)
+		col := canvas.HSL(baseHue, portalSat, clampLight(portalLightMin+0.30*fade))
+		for dx := -halfW; dx <= halfW; dx++ {
+			// Ordered dither thins the beam so the world shows through it.
+			if !canvas.DitherAt(ax+dx, y, 0.35*fade+0.08) {
+				continue
+			}
+			x := ax + dx + off
+			c.Set(x, y, c.At(x, y).Lighten(col))
+		}
+	}
+}
+
+// drawStones rings the pool with eight worn monoliths, taller at the back so
+// the gateway has a readable silhouette from the plaza's usual camera.
+func drawStones(c *canvas.Canvas, ax, cy int) {
+	const n = 8
+	for i := 0; i < n; i++ {
+		ang := (float64(i) + 0.5) / n * 2 * math.Pi
+		sx := ax + int(math.Cos(ang)*float64(haloHalfW)*0.72)
+		sy := cy + int(math.Sin(ang)*float64(haloHalfH)*0.72)
+		// Taller at the back (sin < 0 = behind the pool center).
+		h := 14
+		if math.Sin(ang) < 0 {
+			h = 20
+		}
+		w := 3
+		// Monolith: a slim tapered slab, top-lit with a darker left side and a
+		// ground-contact seam, matching the plaza's light.
+		for dy := 0; dy < h; dy++ {
+			y := sy - dy
+			half := w
+			if dy > h*2/3 {
+				half = w - 1 // taper toward the crown
+			}
+			for dx := -half; dx <= half; dx++ {
+				col := canvas.Color(0x8C8C8C)
+				switch {
+				case dy == h-1:
+					col = 0xB4B4B4 // lit crown
+				case dx < -half/2:
+					col = 0x565656 // shadow side
+				case dy == 0:
+					col = 0x2E2E2E // contact seam
+				}
+				c.Set(sx+dx, y, col)
+			}
+		}
+	}
 }
 
 // drawParticles lifts sparse, fat colored motes off the pool, swaying as they

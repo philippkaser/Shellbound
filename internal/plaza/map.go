@@ -96,6 +96,9 @@ type Map struct {
 	// the session render goroutines.
 	structures []structCell
 	skyline    []towerCell
+	// ao counts a floor cell's solid tall neighbors (0..2, clamped), baked at
+	// load; the render darkens floor by it so walls sit on the ground.
+	ao []uint8
 }
 
 // structCell is one pre-sorted solid cell in the plaza.
@@ -179,7 +182,47 @@ func Load() *Map {
 	}
 	m.buildStructures()
 	m.buildSkyline()
+	m.buildAO()
 	return m
+}
+
+// buildAO bakes each floor cell's count of adjacent tall solids (walls and
+// pillars — the volumes with real height), clamped to 2. The renderer darkens
+// floor tiles by it, a cheap contact-occlusion pass.
+func (m *Map) buildAO() {
+	m.ao = make([]uint8, m.W*m.H)
+	tall := func(x, y int) bool {
+		switch m.Tile(x, y) {
+		case '#', 'P':
+			return true
+		}
+		return false
+	}
+	for cy := 0; cy < m.H; cy++ {
+		for cx := 0; cx < m.W; cx++ {
+			if m.collide[cy*m.W+cx] {
+				continue
+			}
+			n := 0
+			for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+				if tall(cx+d[0], cy+d[1]) {
+					n++
+				}
+			}
+			if n > 2 {
+				n = 2
+			}
+			m.ao[cy*m.W+cx] = uint8(n)
+		}
+	}
+}
+
+// floorAO returns the baked contact-occlusion level for a floor cell.
+func (m *Map) floorAO(x, y int) uint8 {
+	if x < 0 || y < 0 || x >= m.W || y >= m.H {
+		return 0
+	}
+	return m.ao[y*m.W+x]
 }
 
 // Tile returns the tile byte at cell (x, y); out of bounds reads as '#'.

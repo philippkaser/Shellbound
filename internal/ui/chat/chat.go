@@ -138,21 +138,6 @@ func (m *Model) InputLine() string {
 	return m.input.Prompt + m.input.Value()
 }
 
-// ViewInput renders the input bar at the given total width (the bar takes
-// ~60% of it, minimum 24 cells).
-func (m *Model) ViewInput(totalWidth int) string {
-	w := totalWidth * 6 / 10
-	if w < 24 {
-		w = 24
-	}
-	if w > totalWidth-2 {
-		w = totalWidth - 2
-	}
-	// Interior width: subtract border (2) and padding (2).
-	m.input.Width = w - 6
-	return m.theme.InputBar.Width(w).Render(m.input.View())
-}
-
 // History returns the in-memory chat entries. Callers that hold the slice
 // across goroutines should copy it first.
 func (m *Model) History() []Entry { return m.entries }

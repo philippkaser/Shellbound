@@ -3,18 +3,13 @@
 // duration and expires on the overworld's animation tick.
 package toast
 
-import (
-	"time"
-
-	"github.com/shellbound/shellbound/internal/style"
-)
+import "time"
 
 // duration is how long one toast stays visible.
 const duration = 3 * time.Second
 
 // Model is a small FIFO of pending toast messages.
 type Model struct {
-	theme style.Theme
 	queue []entry
 }
 
@@ -24,8 +19,8 @@ type entry struct {
 }
 
 // New creates an empty toast queue.
-func New(theme style.Theme) Model {
-	return Model{theme: theme}
+func New() Model {
+	return Model{}
 }
 
 // Show enqueues a toast.
@@ -46,17 +41,6 @@ func (m *Model) Tick(now time.Time) {
 		}
 		m.queue = m.queue[1:]
 	}
-}
-
-// Active reports whether a toast is currently visible.
-func (m *Model) Active() bool { return len(m.queue) > 0 }
-
-// View renders the current toast (empty string when idle).
-func (m *Model) View() string {
-	if len(m.queue) == 0 {
-		return ""
-	}
-	return m.theme.Toast.Render(m.queue[0].text)
 }
 
 // Message returns the visible toast's text, or "" when idle. The pixel

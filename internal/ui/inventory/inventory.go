@@ -1,14 +1,13 @@
-// Package inventory renders the inventory panel. In 1.0 nothing grants
-// items, so the panel mostly shows its empty state — but it lists real
-// rows from storage so future worlds' grants appear with no UI changes.
+// Package inventory renders the inventory panel: the satchel of items the
+// portal worlds grant, listed straight from storage.
 package inventory
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/shellbound/shellbound/internal/storage"
 	"github.com/shellbound/shellbound/internal/style"
+	"github.com/shellbound/shellbound/internal/ui/listpanel"
 )
 
 // Model is the inventory panel.
@@ -38,53 +37,22 @@ func (m *Model) Close() { m.open = false }
 // IsOpen reports whether the panel is showing.
 func (m *Model) IsOpen() bool { return m.open }
 
-// Lines returns the panel's content as plain text rows for the pixel renderer
-// to bake into its own box (the lipgloss View is unused in the Sixel path).
-func (m *Model) Lines() []string {
-	out := []string{"Inventory", ""}
+// Content returns the panel for the pixel renderer.
+func (m *Model) Content() listpanel.Content {
+	c := listpanel.Content{Title: "Inventory", Cursor: -1, Footer: "Esc to close"}
 	switch {
 	case m.err != nil:
-		out = append(out, "Could not load your satchel.")
+		c.Lines = []string{"Could not load your satchel."}
 	case len(m.items) == 0:
-		out = append(out, "Your satchel is empty.", "Worlds beyond the portals will fill it.")
+		c.Lines = []string{"Your satchel is empty.", "Worlds beyond the portals will fill it."}
 	default:
 		for i, it := range m.items {
 			if i >= 10 {
-				out = append(out, fmt.Sprintf("... and %d more", len(m.items)-i))
+				c.Lines = append(c.Lines, fmt.Sprintf("... and %d more", len(m.items)-i))
 				break
 			}
-			out = append(out, fmt.Sprintf("%-24s x%d", it.Name, it.Qty), "  from "+it.WorldKey)
+			c.Lines = append(c.Lines, fmt.Sprintf("%-24s x%d", it.Name, it.Qty), "  from "+it.WorldKey)
 		}
 	}
-	return append(out, "", "Esc to close")
-}
-
-// View renders the panel box.
-func (m *Model) View() string {
-	var b strings.Builder
-	b.WriteString(m.theme.PanelTitle.Render("Inventory"))
-	b.WriteString("\n\n")
-	switch {
-	case m.err != nil:
-		b.WriteString(m.theme.Dim.Render("Could not load your satchel."))
-	case len(m.items) == 0:
-		b.WriteString(m.theme.Dim.Render("Your satchel is empty."))
-		b.WriteString("\n")
-		b.WriteString(m.theme.Dim.Render("Worlds beyond the portals will fill it."))
-	default:
-		for i, it := range m.items {
-			if i >= 10 {
-				b.WriteString(m.theme.Dim.Render(fmt.Sprintf("… and %d more", len(m.items)-i)))
-				break
-			}
-			line := fmt.Sprintf("%-24s ×%d", it.Name, it.Qty)
-			b.WriteString(m.theme.Text.Render(line))
-			b.WriteString("\n")
-			b.WriteString(m.theme.Faded.Render("  from " + it.WorldKey))
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("\n\n")
-	b.WriteString(m.theme.Faded.Render("Esc to close"))
-	return m.theme.PanelBorder.Width(44).Render(b.String())
+	return c
 }

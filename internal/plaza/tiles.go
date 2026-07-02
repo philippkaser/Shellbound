@@ -12,17 +12,19 @@ import (
 // the only color comes from portals and player names).
 const (
 	toneFloor     = canvas.Color(0x0C0C0C)
-	toneFloorB    = canvas.Color(0x111111) // alternate paving tone (checker)
+	toneFloorB    = canvas.Color(0x101010) // alternate flagstone tone
+	toneFloorC    = canvas.Color(0x0E0E0E) // third flagstone tone (hash-picked)
 	tonePaving    = canvas.Color(0x202020) // pale flagstone ring around the fountain
-	toneFloorEdge = canvas.Color(0x1A1A1A)
-	toneSpeck     = canvas.Color(0x383838)
-	toneSpeckDim  = canvas.Color(0x242424)
-	toneWhite     = canvas.Color(0xF2F2F2)
-	toneLight     = canvas.Color(0xD4D4D4)
-	toneMid       = canvas.Color(0xA1A1A1)
-	toneDim       = canvas.Color(0x6E6E6E)
-	toneDark      = canvas.Color(0x404040)
-	toneShadow    = canvas.Color(0x2A2A2A)
+	toneFloorEdge = canvas.Color(0x060606) // stone joints sit BELOW the fill, so the
+	// floor reads as slabs with dark seams instead of a bright wireframe lattice
+	toneSpeck    = canvas.Color(0x383838)
+	toneSpeckDim = canvas.Color(0x242424)
+	toneWhite    = canvas.Color(0xF2F2F2)
+	toneLight    = canvas.Color(0xD4D4D4)
+	toneMid      = canvas.Color(0xA1A1A1)
+	toneDim      = canvas.Color(0x6E6E6E)
+	toneDark     = canvas.Color(0x404040)
+	toneShadow   = canvas.Color(0x2A2A2A)
 )
 
 // Structure heights in pixels (scaled to the larger tiles).
@@ -54,7 +56,7 @@ func project(gx, gy int, originSx, originSy float64) (int, int) {
 // start (drives water ripple and statue spray).
 func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 	// The distant city behind the plaza, drawn first so everything paints over it.
-	m.renderSkyline(c, originSx, originSy)
+	m.renderSkyline(c, originSx, originSy, t)
 
 	gx0, gy0, gx1, gy1 := iso.VisibleCellRange(originSx, originSy, c.W, c.H, 3)
 	gx0, gy0 = clampi(gx0, 0, m.W-1), clampi(gy0, 0, m.H-1)
@@ -66,9 +68,12 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		fcx, fcy = m.StatueTops[0].X, m.StatueTops[0].Y
 	}
 
-	// Ground plane (flat, so draw order is irrelevant). The floor alternates
-	// between two near-black tones for a paved texture, and a ring of paler
-	// flagstones rings the fountain.
+	// Ground plane (flat, so draw order is irrelevant). The paving is grouped
+	// into 2×2 flagstone slabs — low-frequency variation instead of a
+	// per-tile checker, which shimmered as the camera scrolled — with a
+	// third hash-picked tone breaking up the pattern, dark joints, and an
+	// ambient-occlusion darkening against the walls so structures sit on the
+	// floor instead of floating over it.
 	for gy := gy0; gy <= gy1; gy++ {
 		for gx := gx0; gx <= gx1; gx++ {
 			px, py := project(gx, gy, originSx, originSy)
@@ -77,13 +82,21 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 				drawWater(c, px, py, gx, gy, fcx, fcy, t)
 			default:
 				fill := toneFloor
-				if (gx+gy)&1 == 0 {
+				slab := (gx/2 + gy/2) & 1
+				h := uint32(gx*73856093^gy*19349663) >> 4
+				switch {
+				case slab == 0:
 					fill = toneFloorB
+				case h%5 == 0:
+					fill = toneFloorC
 				}
 				if fcx >= 0 {
 					if d := math.Hypot(float64(gx-fcx), float64(gy-fcy)); d >= 4 && d < 5.4 {
 						fill = tonePaving // decorative ring around the pool
 					}
+				}
+				if ao := m.floorAO(gx, gy); ao > 0 {
+					fill = fill.Scale(1 - 0.22*float64(ao))
 				}
 				iso.DrawDiamond(c, px, py, fill, toneFloorEdge)
 				if tile == '.' {
@@ -96,7 +109,8 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 	}
 
 	// Structures: iterate the pre-sorted (back-to-front) list, culling cells
-	// outside the visible range — no per-frame collect or sort.
+	// outside the visible range — no per-frame collect or sort. The shaded
+	// cube variant adds a ground-contact seam and a subtle AO gradient.
 	for _, s := range m.structures {
 		if s.X < gx0 || s.X > gx1 || s.Y < gy0 || s.Y > gy1 {
 			continue
@@ -104,11 +118,11 @@ func (m *Map) RenderIso(c *canvas.Canvas, originSx, originSy, t float64) {
 		px, py := project(s.X, s.Y, originSx, originSy)
 		switch s.tile {
 		case '#':
-			iso.DrawCube(c, px, py, wallH, toneMid, toneDark, toneDim)
+			iso.DrawCubeShaded(c, px, py, wallH, toneMid, toneDark, toneDim)
 		case 'P':
-			iso.DrawCube(c, px, py, pillarH, toneLight, toneDim, toneMid)
+			iso.DrawCubeShaded(c, px, py, pillarH, toneLight, toneDim, toneMid)
 		case 'B':
-			iso.DrawCube(c, px, py, benchH, toneLight, toneDim, toneMid)
+			iso.DrawCubeShaded(c, px, py, benchH, toneLight, toneDim, toneMid)
 		case 'L':
 			m.drawLampPost(c, px, py)
 		case 'H':

@@ -108,12 +108,6 @@ func Name(key string) string {
 	return "Bare-headed"
 }
 
-// IsStarter reports whether everyone owns the cosmetic by default.
-func IsStarter(key string) bool {
-	c, ok := byKey[key]
-	return ok && c.Starter
-}
-
 // Valid reports whether key names a real cosmetic.
 func Valid(key string) bool { _, ok := byKey[key]; return ok }
 

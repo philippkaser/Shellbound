@@ -5,12 +5,11 @@
 package cosmetics
 
 import (
-	"strings"
-
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/shellbound/shellbound/internal/cosmetic"
 	"github.com/shellbound/shellbound/internal/style"
+	"github.com/shellbound/shellbound/internal/ui/listpanel"
 )
 
 const maxListRows = 12
@@ -75,17 +74,14 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch key.String() {
+	s := key.String()
+	if c, ok := listpanel.Nav(s, m.cursor, len(m.items)); ok {
+		m.cursor = c
+		return nil
+	}
+	switch s {
 	case "esc", "c":
 		m.Close()
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.items)-1 {
-			m.cursor++
-		}
 	case "enter":
 		if m.cursor < len(m.items) {
 			k := m.items[m.cursor].Key
@@ -96,57 +92,31 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// Lines returns the panel content for the pixel renderer. The highlighted row
-// is marked "> " and the worn one with "*".
-func (m *Model) Lines() []string {
-	out := []string{"Wardrobe", ""}
-	if len(m.items) == 0 {
-		out = append(out, "Nothing to wear yet.")
+// Content returns the panel for the pixel renderer; the worn piece is marked
+// with "*" and the cursor row gets the renderer's selection bar.
+func (m *Model) Content() listpanel.Content {
+	c := listpanel.Content{
+		Title:  "Wardrobe",
+		Cursor: -1,
+		Footer: "up/down select  Enter wear  Esc close",
 	}
-	for i, c := range m.items {
+	if len(m.items) == 0 {
+		c.Lines = []string{"Nothing to wear yet."}
+		return c
+	}
+	for i, it := range m.items {
 		if i >= maxListRows {
-			out = append(out, "...")
+			c.Lines = append(c.Lines, "...")
 			break
 		}
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "> "
-		}
 		mark := " "
-		if c.Key == m.equipped {
+		if it.Key == m.equipped {
 			mark = "*"
 		}
-		out = append(out, cursor+mark+" "+pad(c.Name, 18)+c.Rarity.Label())
-	}
-	return append(out, "", "up/down select  Enter wear  Esc close")
-}
-
-// pad right-pads s with spaces to at least n columns so the tier column lines
-// up in the fixed-width panel font.
-func pad(s string, n int) string {
-	if len(s) >= n {
-		return s + " "
-	}
-	return s + strings.Repeat(" ", n-len(s))
-}
-
-// View renders the panel box (unused on the Sixel path, kept for parity).
-func (m *Model) View() string {
-	var b strings.Builder
-	b.WriteString(m.theme.PanelTitle.Render("Wardrobe"))
-	b.WriteString("\n\n")
-	for i, c := range m.items {
-		line := "  " + c.Name
 		if i == m.cursor {
-			line = "> " + c.Name
+			c.Cursor = len(c.Lines)
 		}
-		if c.Key == m.equipped {
-			line += " (worn)"
-		}
-		b.WriteString(m.theme.Text.Render(line))
-		b.WriteString("\n")
+		c.Lines = append(c.Lines, mark+" "+listpanel.Pad(it.Name, 18)+it.Rarity.Label())
 	}
-	b.WriteString("\n")
-	b.WriteString(m.theme.Faded.Render("up/down select  Enter wear  Esc close"))
-	return m.theme.PanelBorder.Width(44).Render(b.String())
+	return c
 }

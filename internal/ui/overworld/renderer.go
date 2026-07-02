@@ -21,6 +21,7 @@ import (
 	"github.com/shellbound/shellbound/internal/render/sprites"
 	"github.com/shellbound/shellbound/internal/render/syncwriter"
 	"github.com/shellbound/shellbound/internal/ui/chat"
+	"github.com/shellbound/shellbound/internal/ui/listpanel"
 )
 
 // Render cadence and framing. The image is the shared fixed viewport (see
@@ -62,7 +63,7 @@ type frameSnapshot struct {
 
 	chat           []chat.Entry
 	toast          string
-	panelLines     []string
+	panel          listpanel.Content
 	chatInput      string
 	chatOpen       bool
 	unreadName     string
@@ -79,6 +80,7 @@ type frameSnapshot struct {
 
 // entity is a render-side interpolated avatar.
 type entity struct {
+	id       int64
 	fx, fy   float64 // current smoothed grid position
 	tx, ty   float64 // target grid position
 	dir      hub.Dir
@@ -258,8 +260,8 @@ func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) strin
 	chat.RenderEntries(r.screen, snap.chat, now, 4, ph-3*canvas.LineH, pw*2/3)
 	r.drawHUD(snap, pw, ph)
 	r.drawToast(snap, pw)
-	if len(snap.panelLines) > 0 {
-		r.drawPanel(snap.panelLines, pw, ph)
+	if !snap.panel.Empty() {
+		r.drawPanel(snap.panel, pw, ph)
 	}
 	if snap.chatOpen {
 		r.drawInputBar(snap.chatInput, pw, ph)
@@ -278,7 +280,7 @@ func (r *Renderer) updateEntities(snap frameSnapshot) {
 		tx, ty := float64(p.x), float64(p.y)/2
 		e := r.ents[p.id]
 		if e == nil {
-			e = &entity{fx: tx, fy: ty}
+			e = &entity{id: p.id, fx: tx, fy: ty}
 			r.ents[p.id] = e
 		}
 		e.tx, e.ty = tx, ty
@@ -322,7 +324,7 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 	sort.Slice(r.sortBuf, func(i, j int) bool {
 		return r.sortBuf[i].fx+r.sortBuf[i].fy < r.sortBuf[j].fx+r.sortBuf[j].fy
 	})
-	for i, e := range r.sortBuf {
+	for _, e := range r.sortBuf {
 		sx, sy := iso.Project(e.fx, e.fy)
 		footX := int(sx - originSx)
 		footY := int(sy-originSy) + iso.HH
@@ -335,7 +337,9 @@ func (r *Renderer) drawPlayers(originSx, originSy, t float64) {
 		footX += edx
 		// A soft oval contact shadow grounds the avatar (stays on the ground).
 		drawShadow(r.screen, footX, footY)
-		frame, bob := sprites.Pose(t, e.moving, float64(i)*1.3)
+		// The idle phase is keyed on the stable player id — not the depth-sort
+		// index, which pops the animation when two avatars cross.
+		frame, bob := sprites.Pose(t, e.moving, float64(e.id%16)*0.9)
 		drawY := footY + bob + edy
 		sprites.Draw(r.screen, footX, drawY, sprites.Facing(e.dir), frame, e.moving)
 		cosmetic.Draw(r.screen, footX, drawY, sprites.Facing(e.dir), e.cosmetic, t)
@@ -371,6 +375,19 @@ func (r *Renderer) applyLighting(snap frameSnapshot, originSx, originSy, t float
 		lights = append(lights, light.Light{
 			X: int(sx - originSx), Y: int(sy-originSy) + iso.HH - 18,
 			Radius: 165, Power: 0.85 * pulse,
+		})
+	}
+	// Every other player carries a smaller lantern too, so peers are visible
+	// in the dark and a crowd gathers in a shared pool of light — without it,
+	// remote players read dimmer than you for no in-world reason.
+	for _, e := range r.ents {
+		if e.id == snap.selfID {
+			continue
+		}
+		sx, sy := iso.Project(e.fx, e.fy)
+		lights = append(lights, light.Light{
+			X: int(sx - originSx), Y: int(sy-originSy) + iso.HH - 18,
+			Radius: 110, Power: 0.55,
 		})
 	}
 
@@ -455,32 +472,58 @@ func (r *Renderer) drawToast(snap frameSnapshot, pw int) {
 	r.screen.DrawText(x+6, 7, snap.toast, 0x000000)
 }
 
-func (r *Renderer) drawPanel(lines []string, pw, ph int) {
+func (r *Renderer) drawPanel(p listpanel.Content, pw, ph int) {
 	px := r.screen.Pixels()
 	for i := range px {
 		px[i] = px[i].Scale(0.35) // dim the world behind the modal
 	}
-	maxw := 0
-	for _, l := range lines {
+	maxw := canvas.TextWidth(p.Title)
+	for _, l := range p.Lines {
 		if w := canvas.TextWidth(l); w > maxw {
 			maxw = w
 		}
 	}
-	const padX, padY = 8, 8
+	if w := canvas.TextWidth(p.Footer); w > maxw {
+		maxw = w
+	}
+	const padX, padY = 10, 8
+	rows := len(p.Lines)
 	bw := maxw + padX*2
-	bh := len(lines)*canvas.LineH + padY*2
+	// title + rule gap + rows + gap + footer
+	bh := padY*2 + canvas.LineH + 4 + rows*canvas.LineH
+	if p.Footer != "" {
+		bh += canvas.LineH + 4
+	}
 	x := pw/2 - bw/2
 	y := ph/2 - bh/2
+
+	// Drop shadow lifts the panel off the dimmed world, then the box itself
+	// with rounded corners (skip the 4 corner pixels of the border).
+	r.screen.FillRect(x+3, y+3, bw, bh, 0x000000)
 	r.screen.FillRect(x, y, bw, bh, 0x0A0A0A)
 	r.screen.Rect(x, y, bw, bh, 0xD4D4D4)
+	for _, c := range [4][2]int{{x, y}, {x + bw - 1, y}, {x, y + bh - 1}, {x + bw - 1, y + bh - 1}} {
+		r.screen.Set(c[0], c[1], 0x0A0A0A)
+	}
+
 	ty := y + padY
-	for i, l := range lines {
-		col := canvas.Color(0xD4D4D4)
-		if i == 0 {
-			col = 0xFFFFFF // title
+	r.screen.DrawText(x+padX, ty, p.Title, 0xFFFFFF)
+	// A rule under the title, the full inner width.
+	r.screen.HLine(x+padX-2, x+bw-padX+2, ty+canvas.GlyphH+2, 0x404040)
+	ty += canvas.LineH + 4
+
+	for i, l := range p.Lines {
+		if i == p.Cursor {
+			// Inverse selection bar: fill the row, draw its text in black.
+			r.screen.FillRect(x+2, ty-2, bw-4, canvas.LineH, 0xD4D4D4)
+			r.screen.DrawText(x+padX, ty, l, 0x000000)
+		} else {
+			r.screen.DrawText(x+padX, ty, l, 0xD4D4D4)
 		}
-		r.screen.DrawText(x+padX, ty, l, col)
 		ty += canvas.LineH
+	}
+	if p.Footer != "" {
+		r.screen.DrawText(x+padX, ty+4, p.Footer, 0x6E6E6E)
 	}
 }
 

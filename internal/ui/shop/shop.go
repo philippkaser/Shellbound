@@ -7,12 +7,12 @@ package shop
 
 import (
 	"strconv"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/shellbound/shellbound/internal/cosmetic"
 	"github.com/shellbound/shellbound/internal/style"
+	"github.com/shellbound/shellbound/internal/ui/listpanel"
 )
 
 const maxListRows = 12
@@ -81,17 +81,14 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch key.String() {
+	s := key.String()
+	if c, ok := listpanel.Nav(s, m.cursor, len(m.stock)); ok {
+		m.cursor = c
+		return nil
+	}
+	switch s {
 	case "esc", "e", "q":
 		m.Close()
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.stock)-1 {
-			m.cursor++
-		}
 	case "enter":
 		if m.cursor < len(m.stock) {
 			c := m.stock[m.cursor]
@@ -104,60 +101,34 @@ func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// Lines returns the panel content for the pixel renderer. The highlighted row
-// is marked "> "; owned rows show "owned" in place of a price.
-func (m *Model) Lines() []string {
-	out := []string{"Shop  " + coin + strconv.Itoa(m.balance), ""}
-	if len(m.stock) == 0 {
-		out = append(out, "Nothing for sale.")
+// Content returns the panel for the pixel renderer; owned rows show "owned"
+// in place of a price and "-" marks pieces the player can't afford yet.
+func (m *Model) Content() listpanel.Content {
+	c := listpanel.Content{
+		Title:  "Shop  " + coin + strconv.Itoa(m.balance),
+		Cursor: -1,
+		Footer: "up/down select  Enter buy  Esc close",
 	}
-	for i, c := range m.stock {
+	if len(m.stock) == 0 {
+		c.Lines = []string{"Nothing for sale."}
+		return c
+	}
+	for i, it := range m.stock {
 		if i >= maxListRows {
-			out = append(out, "...")
+			c.Lines = append(c.Lines, "...")
 			break
 		}
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "> "
-		}
-		tail := strconv.Itoa(c.Price) + coin
+		tail := strconv.Itoa(it.Price) + coin
 		mark := " "
-		if m.owned[c.Key] {
+		if m.owned[it.Key] {
 			mark, tail = "*", "owned"
-		} else if c.Price > m.balance {
+		} else if it.Price > m.balance {
 			mark = "-" // can't afford yet
 		}
-		out = append(out, cursor+mark+" "+pad(c.Name, 16)+pad(c.Rarity.Label(), 10)+tail)
-	}
-	return append(out, "", "up/down select  Enter buy  Esc close")
-}
-
-// pad right-pads s with spaces to at least n columns so the price column lines
-// up in the fixed-width panel font.
-func pad(s string, n int) string {
-	if len(s) >= n {
-		return s + " "
-	}
-	return s + strings.Repeat(" ", n-len(s))
-}
-
-// View renders the panel box (unused on the Sixel path, kept for parity).
-func (m *Model) View() string {
-	var b strings.Builder
-	b.WriteString(m.theme.PanelTitle.Render("Shop"))
-	b.WriteString("\n\n")
-	for i, c := range m.stock {
-		line := "  " + c.Name + "  " + strconv.Itoa(c.Price) + coin
 		if i == m.cursor {
-			line = "> " + c.Name + "  " + strconv.Itoa(c.Price) + coin
+			c.Cursor = len(c.Lines)
 		}
-		if m.owned[c.Key] {
-			line += " (owned)"
-		}
-		b.WriteString(m.theme.Text.Render(line))
-		b.WriteString("\n")
+		c.Lines = append(c.Lines, mark+" "+listpanel.Pad(it.Name, 16)+listpanel.Pad(it.Rarity.Label(), 10)+tail)
 	}
-	b.WriteString("\n")
-	b.WriteString(m.theme.Faded.Render("up/down select  Enter buy  Esc close"))
-	return m.theme.PanelBorder.Width(44).Render(b.String())
+	return c
 }

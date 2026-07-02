@@ -22,7 +22,6 @@ plaza, wearing the color deterministically derived from your key.
 Requires Go 1.22+ and nothing else (the SQLite driver is pure Go — no CGO).
 
 ```sh
-go mod tidy        # first time only: resolves deps, writes go.sum
 make run           # listens on :80, creates ./shellbound.db and a host key
 ```
 
@@ -75,11 +74,6 @@ No systemd and prefer a terminal multiplexer? `tmux new -d -s shellbound
 'make run'` also survives logout (reattach with `tmux attach -t
 shellbound`).
 
-> **Note on go.sum** — this repository ships without a `go.sum`; run
-> `go mod tidy` once before the first build. If a pinned version in
-> `go.mod` has been yanked upstream, `go get <module>@latest` will move it
-> forward; the code sticks to long-stable APIs of these libraries.
-
 Your terminal **must support Sixel graphics** and 24-bit color, and should use
 a dark/black background. Known-good clients: WezTerm, foot, mlterm, Konsole,
 contour, recent Windows Terminal, and `xterm -ti vt340`. Sixel support cannot
@@ -122,25 +116,32 @@ Enter on a name pre-fills a `/w` to them.
 - **Rendering.** The plaza is baked into a true RGB pixel framebuffer
   (`internal/render/canvas`) and shipped as one Sixel image per frame
   (`internal/render/sixel`, a fixed-palette run-length encoder). The world is
-  projected to a 2:1 **isometric** screen space (`internal/render/iso`): paved
-  ground diamonds and depth-sorted extruded cubes for walls, pillars and
-  benches, a detailed tiered **fountain** (rippling pool, spilling sheets, fine
-  spray) and a **city skyline** of towers ringing the back edges. The solid
+  projected to a 2:1 **isometric** screen space (`internal/render/iso`): the
+  ground is 2×2 flagstone slabs with dark joints and baked ambient occlusion
+  against the walls; walls, pillars and benches are depth-sorted extruded
+  cubes with contact seams and an AO gradient so they sit on the floor; a
+  detailed tiered **fountain** (rippling pool, spilling sheets, fine spray);
+  and a **city skyline** of towers ringing the back edges, hazed by
+  distance, with seed-picked rooflines (blinking antenna beacons, penthouse
+  blocks) and windows that twinkle on their own slow clocks. The solid
   structures and the skyline are indexed and pre-sorted once at load, so the
   per-frame render only culls and draws — no allocation or sorting per frame.
-  Avatars are procedural pixel art (`internal/render/sprites`) — hooded, cloaked
-  figures with swinging arms, an idle breathing bob and a soft contact shadow;
+  Avatars are procedural pixel art (`internal/render/sprites`) — hooded,
+  cloaked figures with a 4-phase walk gait (the body dips on the passing
+  frames), swinging arms, an idle breathing bob and a soft contact shadow;
   text
   (names, chat, HUD, panels) is baked with a 5×7 bitmap font so the entire frame
   composites in one place. **Interactive lighting** (`internal/render/light`)
   dims the plaza and lets the player and lamps reveal it, with blocky glow
-  halos. Each portal is a pool (`internal/plaza/portals.go`) lying in the
-  isometric ground plane as a 2:1 ellipse of chunky pixel-art blocks: its
-  surface shimmers with drifting caustics like the fountain's water, motes of
-  its light drift up and fade, and a smooth colored bloom plus a soft floor
-  light wash the portal's glow gently onto the surrounding tiles. Its
-  low-saturation hue is derived from a hash of its world key, so a world's color
-  is stable forever.
+  halos. Each portal is a gateway (`internal/plaza/portals.go`): a pool lying in
+  the isometric ground plane as a 2:1 ellipse of chunky pixel-art blocks,
+  ringed by eight worn standing stones (taller at the back) with a dithered
+  column of its light rising high enough to navigate by from across the
+  plaza. The pool's surface shimmers with drifting caustics like the
+  fountain's water, motes of its light drift up and fade, and a smooth
+  colored bloom plus a soft floor light wash the portal's glow gently onto
+  the surrounding tiles. Its low-saturation hue is derived from a hash of
+  its world key (memoized at load), so a world's color is stable forever.
 - **The render loop.** Bubble Tea's line renderer can't host a Sixel image, so
   the plaza returns a constant `View` (keeping that renderer quiescent) and a
   dedicated background goroutine (`internal/ui/overworld/renderer.go`) produces
@@ -173,6 +174,10 @@ Enter on a name pre-fills a `/w` to them.
   and immediate; position updates are flagged dirty and broadcast by a
   50 ms coalescing sweep (~20 Hz), so keypress spam never floods peers.
   Connecting the same key twice hands the avatar to the newest session.
+  Critical events (battle starts) are reserve-then-commit: buffer room is
+  checked for both players before either is flagged busy, so a stalled
+  session can never soft-lock its opponent; pending challenges expire on
+  the sweep with a notice to the challenger.
 - **Emotes.** Gestures (`internal/emote`) broadcast through the hub like chat
   (the sender hears its own echo, so one render path drives self and peers).
   Each plays for a few seconds as a hand-pixelled icon in a callout bubble
@@ -199,11 +204,15 @@ Enter on a name pre-fills a `/w` to them.
   a `Render` handle (the shared palette, the synchronized session writer and
   the cell size) so a world can ship full Sixel frames exactly like the
   plaza. The **Bomberman** portal leads to **The Vault** (`internal/worlds/
-  bomber`): an isometric bomb arena that unlocks the *Sparkforged Crown* when
-  cleared. The **Doom** portal leads to a first-person **raycast shooter**
+  bomber`): an isometric bomb arena whose wisps hunt you when you're close
+  and flee a burning fuse, with camera shake on every detonation — clearing
+  it unlocks the *Sparkforged Crown*. The **Doom** portal leads to a first-person **raycast shooter**
   (`internal/worlds/doom`): perspective walls with brick shading, billboarded
-  imps whose eyes glow in the portal's hue, hitscan firing, unlocking the
-  *Hellbreaker Horns* for clearing the hall. Both paint their accents in the
+  imps whose eyes glow in the portal's hue (they fan out around you rather
+  than stacking), hitscan firing with a crosshair hit-marker, held-key
+  movement that glides on the tick instead of stuttering with the OS
+  key-repeat, and a distance-attenuated muzzle flash — clearing the hall
+  unlocks the *Hellbreaker Horns*. Both paint their accents in the
   portal's own colour, so a world and its gateway look like one place. The
   **Shellmon** portal leads to a **creature collector** (`internal/worlds/
   shellmon`): pick one of three starters, then set out across a little
@@ -280,6 +289,16 @@ Enter on a name pre-fills a `/w` to them.
   in the `UPDATE` makes check-and-charge a single statement, so no double-spend)
   and grants the cosmetic as a `cosmetic.*` inventory item — the same ownership
   channel the world rewards use, so it shows up in the wardrobe immediately.
+- **Panels.** Every modal list (friends, wardrobe, shop, inventory, the
+  emote picker, inspect cards) is built on one small kit
+  (`internal/ui/listpanel`): panels own their data and hand the renderer a
+  `Content{Title, Lines, Cursor, Footer}`; the renderer draws the chrome —
+  title rule, inverse selection bar, footer hint, drop shadow — in one
+  place, in pixels.
+- **Previews.** The plaza, the Shellmon overworld/battles, the Vault and
+  Doom all have PNG preview harnesses (`*_test.go`, gated behind
+  `PLAZA_PREVIEW_DIR` / `SHELLMON_PREVIEW_DIR`), so the art can be
+  eyeballed and iterated without an SSH session.
 - **Persistence.** Pure-Go SQLite, single writer connection, in-code
   migrations on startup. Tables: `players` (with equipped cosmetic and coin
   balance), `friends`, `dms`, `inventory`, `saves`.
@@ -314,7 +333,7 @@ internal/shellmon/   creature-battler engine: types, moves, species, battles
 internal/worlds/     world implementations (bomber, doom, shellmon, comingsoon)
 internal/plaza/      map, isometric tiles, portals, cosmetics shop stall
 internal/cosmetic/   wearable headwear catalog + rendering
-internal/ui/         login, overworld, chat, inventory, cosmetics, shop, friends, toast
+internal/ui/         login, overworld, chat, inventory, cosmetics, shop, friends, toast, listpanel
 internal/render/     canvas, sixel, iso, light, sprites, screen, syncwriter
 internal/style/      palette, themes
 internal/anim/       camera spring, flicker helpers

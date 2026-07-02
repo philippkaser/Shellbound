@@ -57,6 +57,15 @@ func TestRenderPlazaPreview(t *testing.T) {
 	r.snapPNG(t, dir, "plaza_panel", snap, 0.7)
 	snap.panel = listpanel.Content{Cursor: -1}
 
+	// The fountain, centered, to check the pool's symmetry around the statue.
+	for i := range players {
+		players[i].x = 38 + (i-1)*4
+		players[i].y = (19 + 4) * 2
+	}
+	snap.players = players
+	r.Submit(snap)
+	r.snapPNG(t, dir, "plaza_fountain", snap, 1.2)
+
 	// A second shot near a portal for the gateway/glow art.
 	if len(plaza.Portals) > 0 {
 		px, py := plaza.Portals[0].Center()

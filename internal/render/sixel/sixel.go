@@ -21,6 +21,24 @@ type RGB struct{ R, G, B uint8 }
 // register space 2 is defined in percent, not 0..255).
 func to100(v uint8) int { return (int(v)*100 + 127) / 255 }
 
+// Encoder holds the per-band scratch buffers so a session encoding a frame
+// every tick never re-allocates. The zero value is ready to use; an Encoder
+// must not be shared between goroutines.
+type Encoder struct {
+	masks []byte
+	used  []bool
+	order []int
+}
+
+// Encode appends a complete Sixel image of the w×h indexed framebuffer pix
+// (row-major palette indices, len w*h) to sb, using palette as the index→RGB
+// map. It is a no-op when the inputs are inconsistent so the renderer never
+// fails mid-frame. Convenience wrapper over Encoder for one-shot callers.
+func Encode(sb *strings.Builder, pix []byte, w, h int, palette []RGB) {
+	var e Encoder
+	e.Encode(sb, pix, w, h, palette)
+}
+
 // Encode appends a complete Sixel image of the w×h indexed framebuffer pix
 // (row-major palette indices, len w*h) to sb, using palette as the index→RGB
 // map. It is a no-op when the inputs are inconsistent so the renderer never
@@ -30,7 +48,7 @@ func to100(v uint8) int { return (int(v)*100 + 127) / 255 }
 // banded pixel data and the ST terminator. Every pixel — including index 0 —
 // is painted, so the frame is fully opaque regardless of the terminal's
 // background-fill interpretation.
-func Encode(sb *strings.Builder, pix []byte, w, h int, palette []RGB) {
+func (e *Encoder) Encode(sb *strings.Builder, pix []byte, w, h int, palette []RGB) {
 	if w <= 0 || h <= 0 || len(pix) < w*h || len(palette) == 0 {
 		return
 	}
@@ -58,8 +76,21 @@ func Encode(sb *strings.Builder, pix []byte, w, h int, palette []RGB) {
 	}
 
 	nColors := len(palette)
-	present := make([]bool, nColors)
-	band := make([]byte, w) // 6-bit sixel value per column, for one color
+	// Per-color 6-bit column masks for one band, built in a single pass over
+	// the band's pixels (rather than re-scanning the band once per color).
+	// Scratch is reused across frames; masks are kept zeroed between bands.
+	if cap(e.masks) < nColors*w {
+		e.masks = make([]byte, nColors*w)
+	}
+	if cap(e.used) < nColors {
+		e.used = make([]bool, nColors)
+	}
+	if cap(e.order) < nColors {
+		e.order = make([]int, 0, nColors)
+	}
+	masks := e.masks[:nColors*w]
+	used := e.used[:nColors]
+	order := e.order[:0] // colors in first-appearance order
 
 	for top := 0; top < h; top += 6 {
 		rows := 6
@@ -67,41 +98,36 @@ func Encode(sb *strings.Builder, pix []byte, w, h int, palette []RGB) {
 			rows = h - top
 		}
 
-		// Which colors appear anywhere in this band.
-		for i := range present {
-			present[i] = false
-		}
+		order = order[:0]
 		for r := 0; r < rows; r++ {
 			rowOff := (top + r) * w
+			bit := byte(1) << uint(r)
 			for x := 0; x < w; x++ {
-				if idx := pix[rowOff+x]; int(idx) < nColors {
-					present[idx] = true
+				idx := pix[rowOff+x]
+				if int(idx) >= nColors {
+					continue
 				}
+				if !used[idx] {
+					used[idx] = true
+					order = append(order, int(idx))
+				}
+				masks[int(idx)*w+x] |= bit
 			}
 		}
 
-		first := true
-		for ci := 0; ci < nColors; ci++ {
-			if !present[ci] {
-				continue
-			}
-			// 6-bit column mask for this color across the band.
-			for x := 0; x < w; x++ {
-				var v byte
-				for r := 0; r < rows; r++ {
-					if int(pix[(top+r)*w+x]) == ci {
-						v |= 1 << uint(r)
-					}
-				}
-				band[x] = v
-			}
-			if !first {
+		for i, ci := range order {
+			band := masks[ci*w : ci*w+w]
+			if i > 0 {
 				sb.WriteByte('$') // graphics CR: overlay next color on this band
 			}
-			first = false
 			sb.WriteByte('#')
 			sb.WriteString(strconv.Itoa(ci))
 			writeRLE(sb, band)
+			// Reset this color's mask for the next band.
+			for x := range band {
+				band[x] = 0
+			}
+			used[ci] = false
 		}
 		sb.WriteByte('-') // graphics NL: advance to the next band
 	}
@@ -111,8 +137,13 @@ func Encode(sb *strings.Builder, pix []byte, w, h int, palette []RGB) {
 
 // writeRLE emits one band's sixel characters with `!count` run-length
 // compression. A sixel data byte is '?' (0x3F) plus the 6-bit value.
+// Trailing empty columns are trimmed: a zero sixel paints nothing, so the
+// bytes are pure overhead (the graphics CR/NL reset the column anyway).
 func writeRLE(sb *strings.Builder, band []byte) {
 	n := len(band)
+	for n > 0 && band[n-1] == 0 {
+		n--
+	}
 	for i := 0; i < n; {
 		v := band[i]
 		j := i + 1

@@ -63,24 +63,44 @@ func VisibleCellRange(originSx, originSy float64, canvasW, canvasH, marginCells 
 		int(maxGX) + marginCells, int(maxGY) + marginCells
 }
 
+// rowHalf returns the half-width of the tile diamond at row dy in [0, TileH)
+// (linear taper to the waist).
+func rowHalf(dy int) int {
+	if dy <= HH {
+		return dy * HW / HH
+	}
+	return (TileH - dy) * HW / HH
+}
+
 // DrawDiamond fills the ground diamond whose top vertex is at screen pixel
 // (cx, cy), with an optional edge color (pass fill == edge for no outline).
 func DrawDiamond(c *canvas.Canvas, cx, cy int, fill, edge canvas.Color) {
 	for dy := 0; dy < TileH; dy++ {
-		// Half-width of the diamond at this row (linear taper to the waist).
-		var half int
-		if dy <= HH {
-			half = dy * HW / HH
-		} else {
-			half = (TileH - dy) * HW / HH
+		half := rowHalf(dy)
+		y := cy + dy
+		if edge != fill {
+			c.Set(cx-half, y, edge)
+			c.Set(cx+half, y, edge)
+			if half > 0 {
+				c.HSpan(cx-half+1, cx+half-1, y, fill)
+			}
+			continue
 		}
+		c.HSpan(cx-half, cx+half, y, fill)
+	}
+}
+
+// DrawDiamondTextured fills the ground diamond, choosing each pixel's color
+// via tex(dx, dy) where dx is the signed offset from the center column and dy
+// the row within [0, TileH). It is the hook for per-tile grain — cobble
+// speckle, grass tufts, sand ripples — without every caller re-deriving the
+// diamond's row geometry.
+func DrawDiamondTextured(c *canvas.Canvas, cx, cy int, tex func(dx, dy int) canvas.Color) {
+	for dy := 0; dy < TileH; dy++ {
+		half := rowHalf(dy)
 		y := cy + dy
 		for dx := -half; dx <= half; dx++ {
-			col := fill
-			if dx == -half || dx == half {
-				col = edge
-			}
-			c.Set(cx+dx, y, col)
+			c.Set(cx+dx, y, tex(dx, dy))
 		}
 	}
 }
@@ -96,18 +116,52 @@ func DrawCube(c *canvas.Canvas, cx, cy, h int, top, left, right canvas.Color) {
 	// column is a vertical bar of height h hanging off the lower-left edge.
 	for dx := -HW; dx <= 0; dx++ {
 		yEdge := cy + HH + (dx+HW)/2 // lower-left edge of the ground diamond
-		for y := yEdge - h; y <= yEdge; y++ {
-			c.Set(cx+dx, y, left)
-		}
+		c.VLine(cx+dx, yEdge-h, yEdge, left)
 	}
 	// Right face: from the bottom vertex to the right vertex.
 	for dx := 1; dx <= HW; dx++ {
 		yEdge := cy + TileH - dx/2 // lower-right edge
-		for y := yEdge - h; y <= yEdge; y++ {
-			c.Set(cx+dx, y, right)
-		}
+		c.VLine(cx+dx, yEdge-h, yEdge, right)
 	}
 	// Top face sits h pixels above the ground diamond.
+	DrawDiamond(c, cx, cy-h, top, top)
+}
+
+// DrawCubeShaded draws an extruded tile like DrawCube with two extra depth
+// cues that make volumes sit in the scene instead of floating: the side faces
+// darken toward the ground (a cheap ambient-occlusion gradient), and a thin
+// darker seam runs along the base of each face where it meets the floor.
+func DrawCubeShaded(c *canvas.Canvas, cx, cy, h int, top, left, right canvas.Color) {
+	if h <= 0 {
+		DrawDiamond(c, cx, cy, top, top)
+		return
+	}
+	shade := func(base canvas.Color, y, yTop, yEdge int) canvas.Color {
+		if y == yEdge {
+			return base.Scale(0.55) // contact seam
+		}
+		if h <= 2 {
+			return base
+		}
+		// Darken the lower third toward the ground.
+		v := float64(y-yTop) / float64(h)
+		if v > 0.66 {
+			return base.Scale(1 - 0.28*(v-0.66)/0.34)
+		}
+		return base
+	}
+	for dx := -HW; dx <= 0; dx++ {
+		yEdge := cy + HH + (dx+HW)/2
+		for y := yEdge - h; y <= yEdge; y++ {
+			c.Set(cx+dx, y, shade(left, y, yEdge-h, yEdge))
+		}
+	}
+	for dx := 1; dx <= HW; dx++ {
+		yEdge := cy + TileH - dx/2
+		for y := yEdge - h; y <= yEdge; y++ {
+			c.Set(cx+dx, y, shade(right, y, yEdge-h, yEdge))
+		}
+	}
 	DrawDiamond(c, cx, cy-h, top, top)
 }
 

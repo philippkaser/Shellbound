@@ -835,3 +835,49 @@ func (c *Canvas) DrawTextShadow(x, y int, s string, col, shadow Color) {
 	c.DrawText(x+1, y+1, s, shadow)
 	c.DrawText(x, y, s, col)
 }
+
+// TextWidthScaled returns the pixel width of s drawn at an integer scale.
+func TextWidthScaled(s string, scale int) int {
+	if scale < 1 {
+		scale = 1
+	}
+	return TextWidth(s) * scale
+}
+
+// DrawTextScaled bakes s at an integer pixel scale ≥ 1 — chunky headline text
+// for titles and banners, in the same 5×7 face so it stays on-style. Returns
+// the x just past the last glyph.
+func (c *Canvas) DrawTextScaled(x, y int, s string, col Color, scale int) int {
+	if scale <= 1 {
+		return c.DrawText(x, y, s, col)
+	}
+	for _, r := range s {
+		g, ok := glyphs[r]
+		if ok {
+			for gy := 0; gy < GlyphH; gy++ {
+				row := g[gy]
+				if row == 0 {
+					continue
+				}
+				for gx := 0; gx < GlyphW; gx++ {
+					if row&(1<<uint(GlyphW-1-gx)) != 0 {
+						c.FillRect(x+gx*scale, y+gy*scale, scale, scale, col)
+					}
+				}
+			}
+		}
+		x += AdvanceX * scale
+	}
+	return x
+}
+
+// DrawTextScaledShadow bakes scaled text with a scale-proportional drop
+// shadow, mirroring DrawTextShadow for headline sizes.
+func (c *Canvas) DrawTextScaledShadow(x, y int, s string, col, shadow Color, scale int) {
+	if scale < 1 {
+		scale = 1
+	}
+	off := (scale + 1) / 2
+	c.DrawTextScaled(x+off, y+off, s, shadow, scale)
+	c.DrawTextScaled(x, y, s, col, scale)
+}

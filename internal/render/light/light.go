@@ -64,18 +64,57 @@ func (f *Field) Apply(c *canvas.Canvas, lights []Light, ambient float64) {
 		}
 	}
 
+	// Ordered 8×8 Bayer jitter breaks the visible contour rings a smooth
+	// falloff produces on the 64-step grey ramp: each pixel's multiplier is
+	// nudged by a tiny, position-stable threshold so bands melt into the
+	// blocky dither the rest of the art already speaks.
 	px := c.Pixels()
-	for i, col := range px {
-		if !col.IsGray() {
-			continue // leave color pops vivid
+	for y := 0; y < h; y++ {
+		row := y * w
+		dRow := &bayer8[y&7]
+		for x := 0; x < w; x++ {
+			i := row + x
+			col := px[i]
+			if !col.IsGray() {
+				continue // leave color pops vivid
+			}
+			m := f.mult[i] + dRow[x&7]
+			if m >= 1 {
+				continue
+			}
+			px[i] = col.Scale(m)
 		}
-		m := f.mult[i]
-		if m >= 1 {
-			continue
-		}
-		px[i] = col.Scale(m)
 	}
 }
+
+// bayer8 holds a centered 8×8 ordered-dither offset table scaled to ± half a
+// grey-ramp step (the ramp has 64 levels, so a step is 1/63 ≈ 0.0159 of full
+// scale). Adding it to the light multiplier before quantization turns smooth
+// gradients into a fine checker instead of hard contour rings.
+var bayer8 = func() [8][8]float64 {
+	// Standard recursive Bayer construction.
+	m := [8][8]int{}
+	base := [2][2]int{{0, 2}, {3, 1}}
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			v := 0
+			for bit, sy, sx := 0, y, x; bit < 3; bit++ {
+				v = v*4 + base[sy&1][sx&1]
+				sy >>= 1
+				sx >>= 1
+			}
+			m[y][x] = v
+		}
+	}
+	const step = 1.0 / 63.0
+	var out [8][8]float64
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			out[y][x] = (float64(m[y][x])/64.0 - 0.5) * step
+		}
+	}
+	return out
+}()
 
 // Glow paints an additive bloom of radius r around (cx, cy): a bright core
 // fading out, with the outer band rendered as coarse 2×2 blocks so it reads

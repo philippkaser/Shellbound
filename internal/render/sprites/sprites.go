@@ -115,9 +115,17 @@ func HeadRadius() int { return headR }
 // frame while moving, otherwise a gentle idle breathing bob. phase offsets the
 // idle bob so a crowd of avatars doesn't breathe in unison. It's the single
 // source of avatar timing shared by the plaza and the Shellmon route.
+//
+// The walk is a 4-phase cycle (contact, pass, contact, pass) and the body
+// dips one pixel on the passing frames, so a walking figure has a real gait
+// instead of two alternating stills.
 func Pose(t float64, moving bool, phase float64) (frame, bob int) {
 	if moving {
-		return int(t * 8), 0
+		frame = int(t * 10)
+		if frame%2 == 1 {
+			bob = 1 // body dips as the legs pass each other
+		}
+		return frame, bob
 	}
 	return 0, int(math.Round(math.Sin(t*2.2+phase) * 0.8))
 }
@@ -134,28 +142,41 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 	neckY := shoulderY - neckH
 	headCY := neckY - headR
 
-	// Legs.
+	// Legs: a 4-phase gait. On the contact frames one leg is lifted high and
+	// the other planted; on the passing frames both are nearly under the body
+	// with a slight lift, so the cycle reads contact → pass → contact → pass
+	// instead of flicking between two stills.
 	lFoot, rFoot := footY, footY
 	if moving {
-		if frame%2 == 0 {
+		switch frame % 4 {
+		case 0:
 			lFoot = footY - 4
-		} else {
+		case 1:
+			lFoot, rFoot = footY-1, footY-1
+		case 2:
 			rFoot = footY - 4
+		case 3:
+			lFoot, rFoot = footY-1, footY-1
 		}
 	}
 	limb(c, footX-3, hipY, lFoot, 2, true)
 	limb(c, footX+3, hipY, rFoot, 2, false)
 
-	// Arms swing opposite the legs, hanging from the shoulders.
+	// Arms swing opposite the legs, hanging from the shoulders, easing
+	// through the passing frames.
 	armTop := shoulderY + 1
 	lH, rH := armTop+11, armTop+11
 	if moving {
-		if frame%2 == 0 {
+		switch frame % 4 {
+		case 0:
 			lH -= 3
 			rH += 1
-		} else {
+		case 2:
 			lH += 1
 			rH -= 3
+		default: // passing frames: arms nearly neutral
+			lH -= 1
+			rH -= 1
 		}
 	}
 	limb(c, footX-shHalf, armTop, lH, 1, true)
@@ -195,6 +216,17 @@ func Draw(c *canvas.Canvas, footX, footY int, f Facing, frame int, moving bool) 
 			c.Set(footX+dx, headCY+dy, col)
 		}
 	}
+	// Hood: a darker cowl outlining the top arc of the head and pooling at
+	// the shoulders, so the figure reads as the hooded wanderer of the plaza
+	// rather than a bare dome.
+	for dy := -headR; dy <= 0; dy++ {
+		w := int(math.Sqrt(float64(headR*headR - dy*dy)))
+		c.Set(footX-w-1, headCY+dy, cLow)
+		c.Set(footX+w+1, headCY+dy, cLow)
+	}
+	c.HLine(footX-1, footX+1, headCY-headR-1, cLow) // hood peak
+	c.HLine(footX-4, footX-3, neckY, cLow)          // cowl folds at the shoulders
+	c.HLine(footX+3, footX+4, neckY, cLow)
 	c.HLine(footX-2, footX+2, headCY-headR+1, cTop) // crown catch-light
 
 	// Eyes: two, shifted toward the facing; the back of the head has none.

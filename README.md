@@ -264,8 +264,11 @@ Enter on a name pre-fills a `/w` to them.
   species with role-varied stats and level-up learnsets, level-scaled stats with
   XP/leveling and HP-based catch odds, and a 6v6 battle engine (switches before
   attacks, speed order, KOs cancel queued moves, stat stages, forced switches,
-  a move-choosing AI). Creatures are procedural monochrome sprites built from
-  outlined volumes, fins, horns, leaves, claws and the rest. The same engine
+  a move-choosing AI). Creatures are procedural monochrome sprites drawn as
+  recognizable animal archetypes — a fox, a mouse, a snail, a shark, an owl,
+  a hippo, a rabbit, a hedgehog, a bear, a songbird, a puppy, a tortoise, a
+  frog, a crab, a seahorse, an anglerfish, a penguin and an octopus — so a
+  species reads at a glance, the way a Pokémon does. The same engine
   will drive PvP.
 - **Cosmetics.** Headwear worn over the avatar (`internal/cosmetic`), drawn in
   the same monochrome, overhead-lit style. Pieces come from three places:

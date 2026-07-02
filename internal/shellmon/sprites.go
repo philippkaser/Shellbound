@@ -243,6 +243,95 @@ func (s *spriteCtx) legs(oy, span, h int, n int) {
 	}
 }
 
+// slighter steps a tone one notch up the ramp (rim lights, catch highlights).
+func slighter(c canvas.Color) canvas.Color {
+	switch c {
+	case sLow:
+		return sMid
+	case sMid:
+		return sUp
+	case sUp:
+		return sTop
+	default:
+		return sGlint
+	}
+}
+
+// blob is a flat-shaded outlined volume: one base tone, a darker lower-left
+// shadow wedge and a short top catch-light. Flat fills read as pixel-art
+// bodies where the old 4-band ramp read as a striped egg.
+func (s *spriteCtx) blob(ox, oy, rx, ry int, base canvas.Color) {
+	cx, cy := s.cx+ox*s.u, s.cy+oy*s.u
+	rxu, ryu := rx*s.u, ry*s.u
+	s.oval(cx, cy, rxu+1, ryu+1, sOutline)
+	for dy := -ryu; dy <= ryu; dy++ {
+		w := int(float64(rxu) * math.Sqrt(math.Max(0, 1-float64(dy*dy)/float64(ryu*ryu))))
+		v := float64(dy+ryu) / float64(2*ryu)
+		for dx := -w; dx <= w; dx++ {
+			col := base
+			switch {
+			case v > 0.45 && dx < -w/3:
+				col = sdarker(base) // grounded shadow side
+			case v < 0.18 && dx > -w/2:
+				col = slighter(base) // crown catch-light
+			}
+			s.c.Set(cx+dx, cy+dy, col)
+		}
+	}
+}
+
+// patch is an un-outlined flat oval laid over a body — bellies, muzzles,
+// inner ears, wing feathers.
+func (s *spriteCtx) patch(ox, oy, rx, ry int, col canvas.Color) {
+	s.oval(s.cx+ox*s.u, s.cy+oy*s.u, maxI(rx*s.u, 1), maxI(ry*s.u, 1), col)
+}
+
+// snout is an outlined horizontal triangle pointing dir=-1 (left) or +1
+// (right): muzzles, beaks, nose tapers, fish tails.
+func (s *spriteCtx) snout(ox, oy, halfH, length, dir int, col canvas.Color) {
+	cx, cy := s.cx+ox*s.u, s.cy+oy*s.u
+	s.triSidePx(cx, cy, halfH*s.u+1, length*s.u+1, dir, sOutline)
+	s.triSidePx(cx, cy, halfH*s.u, length*s.u, dir, col)
+}
+
+// triSidePx fills a horizontal triangle whose base is a vertical line at
+// (cx, cy) of half-height h, tapering to a tip `length` px away toward dir.
+func (s *spriteCtx) triSidePx(cx, cy, h, length, dir int, col canvas.Color) {
+	if length < 1 {
+		length = 1
+	}
+	for i := 0; i <= length; i++ {
+		w := h * (length - i) / length
+		x := cx + dir*i
+		for dy := -w; dy <= w; dy++ {
+			s.c.Set(x, cy+dy, col)
+		}
+	}
+}
+
+// ringEye is a large glossy eye for front-facing faces (owls, frogs,
+// octopuses): a bright ring, a dark pupil and a shine. Blinks like eye().
+func (s *spriteCtx) ringEye(ox, oy, r int) {
+	cx, cy := s.cx+ox*s.u, s.cy+oy*s.u
+	ru := maxI(r*s.u/2, 2)
+	if s.blink {
+		s.c.HLine(cx-ru, cx+ru, cy, sOutline)
+		return
+	}
+	s.c.FillCircle(cx, cy, ru+1, sOutline)
+	s.c.FillCircle(cx, cy, ru, sUp)
+	s.c.FillCircle(cx, cy, maxI(ru/2, 1), sDark)
+	s.c.Set(cx-ru/3, cy-ru/3, sGlint)
+}
+
+// tailSeg chains a curved tail/tentacle from (x0,y0) through the given design
+// points at the given thickness.
+func (s *spriteCtx) tailSeg(pts [][2]int, thick int, col canvas.Color) {
+	for i := 0; i+1 < len(pts); i++ {
+		s.stroke(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], thick, col)
+	}
+}
+
 // speckle scatters a few darker flecks over a body for texture (moss, scales).
 func (s *spriteCtx) speckle(ox, oy, rx, ry int, seed int) {
 	pts := []int{3, 7, 1, 5, 2, 6, 4, 0}
@@ -253,297 +342,487 @@ func (s *spriteCtx) speckle(ox, oy, rx, ry int, seed int) {
 	}
 }
 
-// === Spark line — embers, flame and heat: sharp crests, fierce eyes ===
+// The species sprites are drawn as readable animal archetypes — fox, mouse,
+// snail, shark, owl, hippo, rabbit, hedgehog, bear, songbird, puppy,
+// tortoise, frog, crab, seahorse, anglerfish, penguin, octopus — so a player
+// recognizes what a creature IS at a glance, the way a Pokémon reads. All in
+// design pixels around the center; feet land near +9..+11.
+
+// === Spark line ===
 
 func spriteCindle(s *spriteCtx) {
-	// A living flame: a broad ember base narrowing through a tongue to a tip,
-	// with side licks and a glowing core — a flame silhouette, not an egg.
-	s.blade(-5, 1, 2, 5, false, sMid) // side licks
-	s.blade(5, 1, 2, 5, false, sMid)
-	s.mass(0, 6, 6, 4)               // ember base
-	s.mass(0, 1, 4, 5)               // flame body
-	s.blade(0, -4, 4, 8, false, sUp) // flame tip
-	s.arc(0, 7, 4, 2, sLow)          // base seam
-	s.glint(1, -2)
-	s.eye(-2, 4, true)
-	s.eye(2, 4, true)
-	s.dot(0, 7)                          // ember mouth
-	s.c.Set(s.cx-7*s.u, s.cy-2*s.u, sUp) // floating sparks
-	s.c.Set(s.cx+7*s.u, s.cy-5*s.u, sUp)
+	// A fox pup, three-quarter view: tall pointed ears, a sharp muzzle and a
+	// bushy tail whose tip burns bright.
+	// Tail sweeping up on the right, flame tip.
+	s.tailSeg([][2]int{{5, 6}, {9, 4}, {10, 0}}, max1(s.u/2)*3, sMid)
+	s.blade(10, -1, 2, 3, false, sGlint) // burning tail tip
+	// Haunches + body.
+	s.blob(2, 6, 5, 4, sMid)
+	// Front legs.
+	s.stroke(-2, 7, -2, 10, max1(s.u/2)*2, sLow)
+	s.stroke(1, 7, 1, 10, max1(s.u/2)*2, sLow)
+	// Head with big pointed ears.
+	s.blade(-5, -7, 2, 4, false, sMid) // left ear
+	s.blade(0, -8, 2, 4, false, sMid)  // right ear
+	s.patch(-5, -8, 1, 2, sDark)       // inner ears
+	s.patch(0, -9, 1, 2, sDark)
+	s.blob(-2, -3, 4, 4, sMid)
+	// Muzzle pointing left, nose, mouth.
+	s.snout(-6, -2, 2, 3, -1, sUp)
+	s.dot(-9, -2) // nose
+	// Chest ruff.
+	s.patch(-2, 2, 2, 2, sUp)
+	s.eye(-3, -4, true)
+	s.eye(1, -4, true)
 }
 
 func spriteFlickit(s *spriteCtx) {
-	// A sparky imp: horned head, little arms, a forked tail.
-	s.blade(-3, -4, 1, 4, false, sUp) // horns
-	s.blade(3, -4, 1, 4, false, sUp)
-	s.stroke(6, 6, 9, 3, max1(s.u/2)*2, sMid) // forked tail
-	s.stroke(9, 3, 11, 4, max1(s.u/2), sMid)
-	s.stroke(9, 3, 11, 1, max1(s.u/2), sMid)
-	s.mass(0, 5, 5, 5)                          // body
-	s.stroke(-5, 4, -7, 6, max1(s.u/2)*2, sMid) // arms
-	s.stroke(5, 4, 7, 6, max1(s.u/2)*2, sMid)
-	s.mass(0, -1, 4, 4)               // head
-	s.stroke(-2, 5, 2, 3, s.u, sDark) // lightning marking
-	s.stroke(2, 3, -1, 7, s.u, sDark)
-	s.eye(-2, -1, true)
-	s.eye(2, -1, true)
-	s.glint(2, -3)
+	// A mouse: two huge round ears, a plump pear body, whiskers and a
+	// zigzag lightning tail.
+	// Lightning tail, right side.
+	s.tailSeg([][2]int{{5, 5}, {8, 3}, {7, 0}, {10, -2}}, max1(s.u/2)*2, sUp)
+	s.dot2(10, -2, sGlint)
+	// Ears: outlined discs with dark centers.
+	for _, e := range [][2]int{{-4, -7}, {4, -7}} {
+		s.c.FillCircle(s.cx+e[0]*s.u, s.cy+e[1]*s.u, 3*s.u+1, sOutline)
+		s.c.FillCircle(s.cx+e[0]*s.u, s.cy+e[1]*s.u, 3*s.u, sMid)
+		s.c.FillCircle(s.cx+e[0]*s.u, s.cy+e[1]*s.u, 3*s.u/2, sDark)
+	}
+	// Pear body (head merges into it).
+	s.blob(0, 3, 5, 6, sMid)
+	s.patch(0, 6, 3, 3, sUp) // belly
+	// Feet.
+	s.patch(-3, 10, 2, 1, sLow)
+	s.patch(3, 10, 2, 1, sLow)
+	// Whiskers.
+	s.stroke(-4, 2, -8, 1, max1(s.u/3), sUp)
+	s.stroke(-4, 3, -8, 4, max1(s.u/3), sUp)
+	s.stroke(4, 2, 8, 1, max1(s.u/3), sUp)
+	s.stroke(4, 3, 8, 4, max1(s.u/3), sUp)
+	// Face: round eyes, tiny nose, cheek sparks.
+	s.eye(-2, 0, false)
+	s.eye(2, 0, false)
+	s.dot(0, 2) // nose
+	s.dot2(-4, 2, sGlint)
+	s.dot2(4, 2, sGlint)
 }
 
 func spriteCindershell(s *spriteCtx) {
-	// A molten snail: a spiral shell glowing along its seams, head poking out
-	// front, stubby feet — read by the concentric spiral, not a plain dome.
-	s.legs(9, 5, 3, 3)
-	s.mass(2, 3, 8, 7) // shell
-	// Spiral: concentric arcs tightening toward an off-center eye of the shell.
-	s.arc(2, 6, 6, 6, sLow)
-	s.arc(3, 5, 4, 4, sLow)
-	s.arc(3, 4, 2, 2, sLow)
-	s.stroke(0, -3, 3, 0, max1(s.u/2), sUp) // glowing magma seam
-	s.blade(2, -5, 1, 3, false, sUp)        // heat vent
-	s.mass(-7, 5, 3, 3)                     // head
-	s.stroke(-9, 6, -10, 7, s.u, sLow)      // foot/snout
-	s.eye(-7, 4, true)
-	s.glint(4, -1)
+	// A snail: a slug body stretched along the ground, eye stalks up front,
+	// and a big spiral shell riding its back — the spiral glows at the seam.
+	// Slug body: low and long, head rising at the left.
+	s.blob(-3, 8, 8, 2, sUp)
+	s.blob(-8, 5, 3, 4, sUp) // raised head/neck
+	// Eye stalks with bead eyes — the defining snail feature.
+	s.stroke(-9, 2, -11, -2, max1(s.u/2), sUp)
+	s.stroke(-7, 2, -6, -2, max1(s.u/2), sUp)
+	s.eye(-11, -3, false)
+	s.eye(-6, -3, false)
+	// Shell: big disc with a spiral.
+	s.c.FillCircle(s.cx+3*s.u, s.cy-1*s.u, 6*s.u+1, sOutline)
+	s.c.FillCircle(s.cx+3*s.u, s.cy-1*s.u, 6*s.u, sMid)
+	s.arc(3, 3, 5, 5, sDark)
+	s.arc(4, 2, 3, 3, sDark)
+	s.arc(4, 1, 1, 1, sDark)
+	s.stroke(6, -4, 8, -6, s.u, sGlint) // glowing seam vent
+	s.patch(1, -4, 2, 1, slighter(sMid))
+	s.dot(-10, 1) // little mouth
 }
 
 func spriteAshfin(s *spriteCtx) {
-	// A fire salamander: jagged dorsal crest, flame tail, low slung body.
-	s.blade(-2, -1, 2, 5, false, sMid) // crest spines
-	s.blade(1, -2, 2, 6, false, sMid)
-	s.blade(4, -1, 2, 5, false, sMid)
-	s.mass(0, 4, 8, 4)              // body
-	s.blade(9, 2, 2, 5, false, sUp) // flame tail
-	s.mass(-7, 4, 3, 3)             // head
-	s.legs(7, 6, 3, 4)
-	s.stroke(-9, 4, -7, 5, s.u, sDark) // jaw line
-	s.eye(-7, 3, true)
-	s.glint(0, 2)
+	// A shark in profile, swimming left: spindle body, the classic dorsal
+	// fin, a two-lobed tail and gill slits — the tail lobes burn like coals.
+	// Tail (right): two lobes.
+	s.snout(9, 0, 1, 4, 1, sUp)
+	s.blade(11, -2, 1, 3, false, sUp)
+	s.blade(11, 4, 1, 3, true, sUp)
+	s.dot2(12, -3, sGlint) // ember tips
+	s.dot2(12, 5, sGlint)
+	// Body: horizontal spindle with a pale belly.
+	s.blob(0, 2, 9, 4, sMid)
+	s.patch(-2, 4, 6, 2, sUp) // belly
+	// Nose taper.
+	s.snout(-9, 1, 3, 3, -1, sMid)
+	// Dorsal fin.
+	s.blade(1, -2, 3, 5, false, sMid)
+	// Pectoral fin.
+	s.blade(-2, 8, 2, 3, true, sLow)
+	// Gills: three slits.
+	s.stroke(-4, 0, -4, 3, max1(s.u/3), sDark)
+	s.stroke(-3, 0, -3, 3, max1(s.u/3), sDark)
+	s.stroke(-2, 0, -2, 3, max1(s.u/3), sDark)
+	// Mouth underslung, a hint of teeth, fierce eye.
+	s.stroke(-10, 4, -6, 5, max1(s.u/3), sOutline)
+	s.c.Set(s.cx-8*s.u, s.cy+4*s.u+1, sGlint)
+	s.eye(-8, 0, true)
 }
-
-// === Bramble line — seeds, vines, thorns and moss: soft eyes, leafy crowns ===
-
-func spriteSprigling(s *spriteCtx) {
-	// A sprouting seed: paired leaves on a stem, little root feet.
-	s.stroke(0, -1, 0, -6, max1(s.u/2)*2, sLow) // stem
-	s.leaf(-3, -6, 4, false)
-	s.leaf(3, -7, 4, true)
-	s.mass(0, 5, 6, 5) // seed body
-	s.arc(0, 6, 4, 2, sLow)
-	s.stroke(-3, 9, -4, 11, s.u, sLow) // roots
-	s.stroke(3, 9, 4, 11, s.u, sLow)
-	s.eye(-2, 5, false)
-	s.eye(2, 5, false)
-	s.glint(2, 3)
-}
-
-func spriteThornpod(s *spriteCtx) {
-	// A spiny pod: layered scales, thorns all round, a sprig on top.
-	for _, a := range []float64{0.5, 1.2, 1.9, 2.6, 3.3, 4.0, 4.7, 5.4, 6.1} {
-		dx := int(math.Round(math.Cos(a) * 7))
-		dy := int(math.Round(math.Sin(a)*9)) + 2
-		s.stroke(dx*6/7, dy*6/9, dx, dy, s.u, sMid) // radiating thorns
-	}
-	s.mass(0, 2, 6, 8) // pod
-	s.arc(0, 0, 5, 3, sLow)
-	s.arc(0, 3, 5, 3, sLow)
-	s.arc(0, 6, 4, 2, sLow)
-	s.stroke(0, -6, 1, -9, s.u, sLow) // sprig
-	s.leaf(2, -9, 3, true)
-	s.eye(-2, 2, true)
-	s.eye(2, 2, true)
-}
-
-func spriteMossmaw(s *spriteCtx) {
-	// A mossy beast on four legs with a wide toothy maw and leafy back.
-	s.leaf(-5, -4, 3, false) // back tufts
-	s.leaf(0, -6, 4, false)
-	s.leaf(5, -4, 3, true)
-	s.mass(0, 3, 9, 6) // bulk
-	s.legs(9, 6, 3, 4)
-	s.speckle(0, 2, 7, 4, 1)                            // moss flecks
-	s.oval(s.cx-3*s.u, s.cy+5*s.u, 5*s.u, 2*s.u, sDark) // maw
-	s.teeth(-3, 4, 4, 5, true)
-	s.eye(-5, -1, true)
-	s.eye(0, -1, true)
-	s.glint(4, 0)
-}
-
-func spriteFernling(s *spriteCtx) {
-	// A slender fern sprite: a frond crown, vine arms, a bud.
-	for i, a := range []float64{-1.1, -0.55, 0, 0.55, 1.1} {
-		tipX := int(math.Round(math.Sin(a) * 8))
-		s.stroke(0, -2, tipX, -10, max1(s.u/2)*2, sLow)
-		s.leaf(tipX, -10, 3, i%2 == 0)
-	}
-	s.mass(0, 5, 4, 6)                          // slim body
-	s.stroke(-4, 4, -8, 6, max1(s.u/2)*2, sLow) // vine arms
-	s.leaf(-8, 6, 2, false)
-	s.stroke(4, 4, 8, 5, max1(s.u/2)*2, sLow)
-	s.leaf(8, 5, 2, true)
-	s.eye(-1, 5, false)
-	s.eye(2, 5, false)
-	s.glint(2, 3)
-}
-
-// === Tide line — droplets, shells and waves: glossy eyes, fins ===
-
-func spriteDripling(s *spriteCtx) {
-	// A living dew drop with fin ears, a finned tail and a big glossy eye.
-	s.blade(0, -4, 3, 6, false, sUp)  // droplet point
-	s.blade(-6, 1, 2, 4, false, sMid) // fin ears
-	s.blade(6, 1, 2, 4, false, sMid)
-	s.mass(0, 4, 6, 6)
-	s.blade(4, 9, 3, 3, true, sUp) // tail fin
-	s.arc(0, 5, 4, 2, sUp)         // ripple shine
-	s.eye(0, 3, false)
-	s.c.FillCircle(s.cx+1*s.u, s.cy+2*s.u, max1(s.u/3), sGlint) // big shine
-	s.glint(3, 0)
-}
-
-func spriteBrineback(s *spriteCtx) {
-	// An armored crab: segmented carapace, eye stalks, big pincers, many legs.
-	s.legs(7, 7, 3, 6)
-	s.mass(0, 3, 9, 5) // carapace
-	s.arc(0, 1, 7, 3, sLow)
-	s.arc(0, 4, 6, 2, sLow)
-	// pincers on arms
-	s.stroke(-8, 3, -11, 1, max1(s.u/2)*2, sMid)
-	s.mass(-11, 0, 2, 2)
-	s.blade(-12, -1, 1, 2, false, sUp)
-	s.blade(-10, -1, 1, 2, false, sUp)
-	s.stroke(8, 3, 11, 1, max1(s.u/2)*2, sMid)
-	s.mass(11, 0, 2, 2)
-	s.blade(12, -1, 1, 2, false, sUp)
-	s.blade(10, -1, 1, 2, false, sUp)
-	// eye stalks
-	s.stroke(-2, 0, -2, -3, s.u, sMid)
-	s.stroke(2, 0, 2, -3, s.u, sMid)
-	s.eye(-2, -4, false)
-	s.eye(2, -4, false)
-}
-
-func spriteTidecoil(s *spriteCtx) {
-	// A sea serpent: a coiling stack of finned segments rising to a crested head.
-	s.mass(0, 8, 6, 3)
-	s.blade(0, 5, 2, 3, false, sUp)
-	s.mass(3, 4, 5, 3)
-	s.blade(3, 1, 2, 3, false, sUp)
-	s.mass(-2, 0, 5, 3)
-	s.blade(-2, -3, 2, 3, false, sUp)
-	s.mass(1, -5, 4, 4)                  // head
-	s.blade(1, -9, 3, 4, false, sUp)     // crest
-	s.stroke(-3, -5, -5, -4, s.u, sDark) // snout
-	s.eye(0, -6, true)
-	s.glint(2, -7)
-}
-
-func spriteGulper(s *spriteCtx) {
-	// A deep-sea angler: a round body, a vast toothy mouth, a glowing lure.
-	s.stroke(-1, -6, 2, -11, max1(s.u/2)*2, sLow) // lure stalk
-	s.c.FillCircle(s.cx+2*s.u, s.cy-11*s.u, max1(s.u/2)+1, sGlint)
-	s.mass(1, 3, 8, 7)
-	s.blade(8, 1, 2, 4, false, sMid)           // dorsal fin
-	s.stroke(9, 5, 11, 7, max1(s.u/2)*2, sMid) // tail
-	// the maw: a big dark mouth low and forward with two rows of teeth
-	s.oval(s.cx-3*s.u, s.cy+5*s.u, 6*s.u, 3*s.u, sDark)
-	s.teeth(-3, 3, 5, 6, true)
-	s.teeth(-3, 7, 5, 5, false)
-	s.eye(0, -2, true)
-	s.glint(4, -3)
-}
-
-// === second wave ===
 
 func spriteVoltun(s *spriteCtx) {
-	// A charged orb with two crackling bolt antennae.
-	s.stroke(-2, -6, -4, -10, max1(s.u/2), sUp) // left bolt
-	s.stroke(-4, -10, -2, -12, max1(s.u/2), sUp)
-	s.stroke(2, -6, 4, -10, max1(s.u/2), sUp) // right bolt
-	s.stroke(4, -10, 2, -12, max1(s.u/2), sUp)
-	s.dot2(-2, -12, sGlint)
-	s.dot2(2, -12, sGlint)
-	s.mass(0, 2, 7, 7)
-	s.stroke(-3, 0, 0, 3, s.u, sUp) // bolt marking
-	s.stroke(0, 3, 2, 6, s.u, sUp)
-	s.eye(-2, 1, true)
-	s.eye(3, 1, true)
-	s.glint(2, -1)
+	// An owl, front-on: upright egg body, two huge ringed eyes in a facial
+	// disc, ear tufts, folded wings and little talons — charged with static.
+	// Ear tufts.
+	s.blade(-4, -9, 1, 3, false, sMid)
+	s.blade(4, -9, 1, 3, false, sMid)
+	// Body.
+	s.blob(0, 0, 6, 8, sMid)
+	// Folded wings: darker side patches.
+	s.patch(-5, 2, 2, 5, sLow)
+	s.patch(5, 2, 2, 5, sLow)
+	// Chest chevrons.
+	s.stroke(-2, 4, 0, 5, max1(s.u/3), sLow)
+	s.stroke(0, 5, 2, 4, max1(s.u/3), sLow)
+	s.stroke(-2, 6, 0, 7, max1(s.u/3), sLow)
+	s.stroke(0, 7, 2, 6, max1(s.u/3), sLow)
+	// Facial disc + big ring eyes + beak.
+	s.patch(0, -4, 5, 3, sUp)
+	s.ringEye(-2, -4, 3)
+	s.ringEye(2, -4, 3)
+	s.triAt(s.cx, s.cy, max1(s.u/2), s.u+1, true, sDark) // small down beak
+	// Static sparks off the tufts.
+	s.dot2(-6, -11, sGlint)
+	s.dot2(6, -11, sGlint)
+	// Talons.
+	s.stroke(-2, 8, -2, 10, max1(s.u/2), sLow)
+	s.stroke(2, 8, 2, 10, max1(s.u/2), sLow)
 }
 
 func spriteMagmaw(s *spriteCtx) {
-	// A low, heavy brute with a glowing magma maw.
-	s.mass(0, 2, 10, 6)
-	s.legs(8, 7, 3, 4)
-	s.arc(0, -2, 7, 3, sLow)
-	s.oval(s.cx, s.cy+5*s.u, 7*s.u, 3*s.u, sDark) // maw
-	s.teeth(0, 3, 5, 6, true)
-	s.teeth(0, 7, 5, 5, false)
-	s.stroke(-6, -1, -4, 1, s.u, sUp) // glowing cracks
-	s.stroke(5, -1, 3, 1, s.u, sUp)
-	s.eye(-4, -2, true)
-	s.eye(4, -2, true)
-	s.glint(2, -3)
+	// A hippo: a massive rounded muzzle in front of a barrel body, tiny round
+	// ears, nostril bumps and tusk nubs in the jaw — magma glows in the seams.
+	// Barrel body behind.
+	s.blob(4, 3, 6, 5, sMid)
+	s.legs(8, 6, 3, 4)
+	// Glowing back cracks.
+	s.stroke(4, -1, 6, 1, max1(s.u/2), sGlint)
+	s.stroke(7, 0, 8, 2, max1(s.u/3), sGlint)
+	// Head: big dome + huge muzzle.
+	s.blob(-4, -1, 5, 4, sMid)
+	s.blob(-6, 4, 6, 4, sUp) // muzzle
+	// Tiny ears.
+	s.dot2(-7, -5, sMid)
+	s.dot2(-1, -6, sMid)
+	// Nostrils on the muzzle top.
+	s.dot(-9, 2)
+	s.dot(-5, 2)
+	// Mouth line + tusk nubs poking up.
+	s.stroke(-11, 6, -1, 6, max1(s.u/3), sOutline)
+	s.triAt(s.cx-9*s.u, s.cy+6*s.u, max1(s.u/2), s.u, false, sGlint)
+	s.triAt(s.cx-3*s.u, s.cy+6*s.u, max1(s.u/2), s.u, false, sGlint)
+	s.eye(-6, -2, true)
+	s.eye(-2, -3, true)
 }
 
-func spriteFrostnip(s *spriteCtx) {
-	// A crystalline sprite — a small core ringed by sharp ice shards.
-	s.blade(0, -4, 2, 7, false, sUp) // top shard
-	s.blade(-6, 0, 2, 5, false, sMid)
-	s.blade(6, 0, 2, 5, false, sMid)
-	s.blade(-4, 6, 2, 5, true, sMid) // lower shards
-	s.blade(4, 6, 2, 5, true, sMid)
-	s.mass(0, 2, 5, 5)
-	s.glint(1, 0)
-	s.eye(-2, 2, false)
-	s.eye(2, 2, false)
+// === Bramble line ===
+
+func spriteSprigling(s *spriteCtx) {
+	// A rabbit: two long leaf-bladed ears, a crouched round body, cheeks,
+	// a puff tail and big hind feet.
+	// Ears: tall, slightly splayed, leafy inner.
+	s.blade(-3, -6, 2, 7, false, sMid)
+	s.blade(3, -7, 2, 7, false, sMid)
+	s.patch(-3, -9, 1, 2, sLow)
+	s.patch(3, -10, 1, 2, sLow)
+	// Puff tail.
+	s.dot2(7, 5, sGlint)
+	// Body crouched.
+	s.blob(0, 4, 6, 5, sMid)
+	// Hind haunch + big hind foot.
+	s.patch(4, 6, 3, 3, sLow)
+	s.patch(4, 9, 3, 1, sUp)
+	// Front paws.
+	s.stroke(-3, 8, -3, 10, max1(s.u/2), sLow)
+	s.stroke(-1, 8, -1, 10, max1(s.u/2), sLow)
+	// Face: soft eyes, Y nose, whisker dots.
+	s.eye(-3, 2, false)
+	s.eye(1, 2, false)
+	s.dot(-1, 4) // nose
+	s.c.Set(s.cx-4*s.u, s.cy+4*s.u, sUp)
+	s.c.Set(s.cx+2*s.u, s.cy+4*s.u, sUp)
 }
 
-func spriteAnchora(s *spriteCtx) {
-	// A barnacled shell clutching an anchor.
-	s.mass(0, 2, 9, 6)
-	s.arc(0, 0, 7, 3, sLow)
-	s.arc(0, 3, 6, 2, sLow)
-	s.legs(8, 6, 3, 2)
-	// Anchor: shaft, stock, two flukes.
-	s.stroke(0, -8, 0, 2, max1(s.u/2)*2, sUp)
-	s.stroke(-3, -6, 3, -6, max1(s.u/2)*2, sUp)
-	s.stroke(0, 2, -4, -1, max1(s.u/2)*2, sUp)
-	s.stroke(0, 2, 4, -1, max1(s.u/2)*2, sUp)
-	s.dot2(0, -9, sGlint) // ring
-	s.eye(-3, 3, false)
-	s.eye(3, 3, false)
+func spriteThornpod(s *spriteCtx) {
+	// A hedgehog in profile, nosing left: a dome of thorny quills over a
+	// pale face wedge that tapers to a pointed snout.
+	// Quill dome: blades following the back's curve.
+	s.blob(1, 3, 8, 6, sLow) // quill mass base
+	for _, q := range [][3]int{{-4, -3, 4}, {-1, -5, 5}, {3, -4, 5}, {6, -1, 4}, {8, 2, 3}} {
+		s.blade(q[0], q[1], 1, q[2], false, sMid)
+	}
+	// A couple of thorns flank low.
+	s.blade(8, 6, 1, 3, true, sMid)
+	// Face wedge + snout.
+	s.patch(-5, 4, 4, 3, sUp)
+	s.snout(-8, 4, 2, 4, -1, sUp)
+	s.dot(-12, 4) // nose
+	// Feet stubs.
+	s.stroke(-4, 8, -4, 10, max1(s.u/2), sLow)
+	s.stroke(1, 9, 1, 11, max1(s.u/2), sLow)
+	s.stroke(5, 8, 5, 10, max1(s.u/2), sLow)
+	s.eye(-6, 3, false)
+}
+
+func spriteMossmaw(s *spriteCtx) {
+	// A bear: a humped mossy back, a big round head with round ears and a
+	// short snout, sitting up on heavy forelegs — unmistakably ursine next
+	// to Magmaw's long low hippo.
+	// Humped body, sitting: tall at the shoulder.
+	s.blob(3, 3, 6, 6, sMid)
+	// Heavy forelegs + haunch.
+	s.stroke(-1, 6, -1, 10, max1(s.u/2)*3, sLow)
+	s.stroke(6, 7, 6, 10, max1(s.u/2)*3, sLow)
+	s.patch(6, 6, 3, 3, sLow)
+	// Moss on the hump.
+	s.leaf(4, -4, 3, false)
+	s.leaf(7, -2, 2, true)
+	s.speckle(4, 2, 4, 3, 1)
+	// Big round head with round outlined ears.
+	for _, e := range [][2]int{{-7, -8}, {-1, -9}} {
+		s.c.FillCircle(s.cx+e[0]*s.u, s.cy+e[1]*s.u, s.u+s.u/2+1, sOutline)
+		s.c.FillCircle(s.cx+e[0]*s.u, s.cy+e[1]*s.u, s.u+s.u/2, sMid)
+	}
+	s.blob(-4, -4, 4, 4, sMid)
+	// Short snout: a small pale muzzle with a big nose, jaw slightly open.
+	s.patch(-6, -2, 2, 1, sUp)
+	s.dot(-8, -3)
+	s.stroke(-7, -1, -4, 0, max1(s.u/3), sOutline)
+	s.c.Set(s.cx-6*s.u, s.cy-1*s.u+1, sGlint) // one tooth
+	s.eye(-6, -6, true)
+	s.eye(-2, -6, true)
+}
+
+func spriteFernling(s *spriteCtx) {
+	// A songbird perched on stick legs: round head and breast, a wing of
+	// feathers, a fern-frond tail fanning behind and a tiny beak.
+	// Frond tail: three leaves fanning up-right.
+	s.stroke(4, 2, 8, -1, max1(s.u/2), sLow)
+	s.leaf(8, -2, 3, true)
+	s.stroke(4, 3, 9, 3, max1(s.u/2), sLow)
+	s.leaf(9, 2, 3, true)
+	s.stroke(4, 4, 8, 6, max1(s.u/2), sLow)
+	s.leaf(9, 6, 2, true)
+	// Body + head (one soft pear).
+	s.blob(0, 3, 4, 5, sMid)
+	s.blob(-2, -4, 3, 3, sMid)
+	// Breast.
+	s.patch(-1, 4, 2, 3, sUp)
+	// Wing: darker patch with feather lines.
+	s.patch(2, 3, 2, 3, sLow)
+	s.stroke(1, 2, 3, 4, max1(s.u/3), sOutline)
+	s.stroke(1, 4, 3, 6, max1(s.u/3), sOutline)
+	// Beak + crest leaf.
+	s.snout(-5, -4, 1, 2, -1, sGlint)
+	s.stroke(-2, -7, -1, -9, max1(s.u/3), sLow)
+	s.leaf(0, -9, 2, true)
+	// Stick legs.
+	s.stroke(-1, 8, -1, 11, max1(s.u/3), sLow)
+	s.stroke(1, 8, 1, 11, max1(s.u/3), sLow)
+	s.stroke(-1, 11, -2, 11, max1(s.u/3), sLow)
+	s.stroke(1, 11, 0, 11, max1(s.u/3), sLow)
+	s.eye(-3, -5, false)
 }
 
 func spritePricklepup(s *spriteCtx) {
-	// A bristly cactus pup: ear blades, a back of spines, stubby legs.
-	s.blade(-3, -5, 1, 4, false, sUp) // ears
-	s.blade(3, -5, 1, 4, false, sUp)
-	for _, dx := range []int{-5, -2, 1, 4} {
-		s.blade(dx, -2, 1, 3, false, sMid) // back spines
+	// A puppy, three-quarter view: floppy ears, a blunt muzzle, a wagging
+	// leaf-tipped tail and a bristle of cactus spines down its back.
+	// Wagging tail with a leaf tip.
+	s.stroke(6, 2, 9, -1, max1(s.u/2)*2, sMid)
+	s.leaf(10, -2, 2, true)
+	// Body.
+	s.blob(2, 4, 6, 4, sMid)
+	s.legs(8, 5, 3, 4)
+	// Back spines.
+	for _, dx := range []int{0, 3, 6} {
+		s.blade(dx, -1, 1, 2, false, sLow)
 	}
-	s.mass(0, 4, 6, 6)
-	s.legs(10, 4, 2, 2)
-	s.speckle(0, 4, 4, 4, 2)
-	s.eye(-2, 4, false)
-	s.eye(2, 4, false)
-	s.glint(2, 2)
+	// Head: round, floppy ears hanging at the sides.
+	s.blob(-5, -3, 4, 4, sMid)
+	s.blade(-9, -3, 1, 4, true, sLow) // floppy ears point DOWN
+	s.blade(-1, -3, 1, 4, true, sLow)
+	// Muzzle + nose + happy mouth.
+	s.patch(-6, 0, 2, 2, sUp)
+	s.dot(-8, -1)
+	s.stroke(-8, 1, -6, 2, max1(s.u/3), sOutline)
+	s.eye(-6, -4, false)
+	s.eye(-3, -4, false)
 }
 
 func spriteBloomback(s *spriteCtx) {
-	// A shelled grazer with a blossom crowning its back.
-	s.mass(0, 4, 9, 5) // shell
-	s.arc(0, 2, 7, 3, sLow)
-	s.legs(8, 6, 3, 4)
-	s.mass(-8, 4, 3, 3) // head
-	s.eye(-8, 3, false)
-	// Flower: a ring of petals around a bright center.
+	// A tortoise in profile, head out to the left: a high dome shell with
+	// plate seams and a blossom growing from its crown.
+	// Legs first (behind the shell rim): stout columns.
+	s.stroke(-5, 8, -5, 11, max1(s.u/2)*3, sLow)
+	s.stroke(-1, 9, -1, 11, max1(s.u/2)*3, sLow)
+	s.stroke(3, 9, 3, 11, max1(s.u/2)*3, sLow)
+	s.stroke(6, 8, 6, 11, max1(s.u/2)*3, sLow)
+	// Head on a short neck, big enough to carry a face.
+	s.stroke(-7, 5, -9, 4, max1(s.u/2)*3, sUp) // neck
+	s.blob(-10, 3, 3, 3, sUp)
+	s.eye(-11, 2, false)
+	s.stroke(-13, 5, -11, 5, max1(s.u/3), sOutline) // mouth
+	// Dome shell with plate seams.
+	s.blob(1, 2, 8, 6, sMid)
+	s.arc(1, 6, 6, 5, sDark)
+	s.arc(1, 6, 3, 3, sDark)
+	s.stroke(-3, 0, -5, 3, max1(s.u/3), sDark)
+	s.stroke(5, 0, 7, 3, max1(s.u/3), sDark)
+	// Shell rim.
+	s.stroke(-7, 6, 9, 6, max1(s.u/3), sOutline)
+	// The blossom on top.
 	for _, a := range []float64{0, 1.05, 2.1, 3.14, 4.19, 5.24} {
-		px := int(math.Round(math.Cos(a) * 3))
-		py := int(math.Round(math.Sin(a)*2)) - 2
-		s.dot2(px, py, sUp)
+		px := int(math.Round(math.Cos(a) * 2))
+		py := int(math.Round(math.Sin(a)*1.5)) - 6
+		s.dot2(1+px, py, sUp)
 	}
-	s.dot2(0, -2, sGlint)
+	s.dot2(1, -6, sGlint)
+}
+
+// === Tide line ===
+
+func spriteDripling(s *spriteCtx) {
+	// A frog, front-on and crouched: eye bumps on top of a wide squat body,
+	// a broad smile, splayed front feet and a dewdrop on its brow.
+	// Hind haunches poking out the sides.
+	s.patch(-7, 6, 2, 3, sLow)
+	s.patch(7, 6, 2, 3, sLow)
+	// Body: wide and squat.
+	s.blob(0, 3, 7, 5, sMid)
+	s.patch(0, 6, 4, 2, sUp) // pale belly
+	// Eye bumps on top.
+	s.c.FillCircle(s.cx-4*s.u, s.cy-3*s.u, 2*s.u+1, sOutline)
+	s.c.FillCircle(s.cx-4*s.u, s.cy-3*s.u, 2*s.u, sMid)
+	s.c.FillCircle(s.cx+4*s.u, s.cy-3*s.u, 2*s.u+1, sOutline)
+	s.c.FillCircle(s.cx+4*s.u, s.cy-3*s.u, 2*s.u, sMid)
+	s.ringEye(-4, -3, 2)
+	s.ringEye(4, -3, 2)
+	// The wide mouth.
+	s.arc(0, 1, 5, -2, sOutline) // inverted arc = smile
+	// Front feet splayed.
+	s.patch(-4, 9, 2, 1, sUp)
+	s.patch(4, 9, 2, 1, sUp)
+	// Dewdrop on the brow.
+	s.blade(0, -7, 1, 2, false, sGlint)
+}
+
+func spriteBrineback(s *spriteCtx) {
+	// A crab: a wide flat carapace, two BIG claws held up front, stalk eyes
+	// and three angled legs per side.
+	// Legs: three per side, angled down-out.
+	for i, l := range [][4]int{{-6, 4, -10, 8}, {-5, 5, -9, 10}, {-4, 6, -7, 11}} {
+		_ = i
+		s.stroke(l[0], l[1], l[2], l[3], max1(s.u/2), sLow)
+		s.stroke(-l[0], l[1], -l[2], l[3], max1(s.u/2), sLow)
+	}
+	// Carapace: wide and flat, with a seam.
+	s.blob(0, 3, 8, 4, sMid)
+	s.arc(0, 5, 6, 3, sDark)
+	// Claws: big outlined discs with a wedge notch.
+	for _, side := range []int{-1, 1} {
+		cxp, cyp := side*9, 0
+		s.stroke(side*6, 3, cxp, cyp+1, max1(s.u/2)*2, sMid)
+		s.c.FillCircle(s.cx+cxp*s.u, s.cy+cyp*s.u, 3*s.u+1, sOutline)
+		s.c.FillCircle(s.cx+cxp*s.u, s.cy+cyp*s.u, 3*s.u, sUp)
+		// the notch: a dark wedge opening outward
+		s.triSidePx(s.cx+(cxp+side*3)*s.u, s.cy+cyp*s.u, s.u, 2*s.u, side, sOutline)
+	}
+	// Stalk eyes.
+	s.stroke(-2, 1, -2, -2, max1(s.u/2), sMid)
+	s.stroke(2, 1, 2, -2, max1(s.u/2), sMid)
+	s.eye(-2, -3, false)
+	s.eye(2, -3, false)
+	// Bubbles.
+	s.dot2(6, -3, sGlint)
+}
+
+func spriteTidecoil(s *spriteCtx) {
+	// A seahorse in profile facing left: tube snout, coronet crest, a ridged
+	// belly and a tail that curls under it — the coil.
+	// Curled tail: spirals under the body.
+	s.tailSeg([][2]int{{2, 5}, {4, 8}, {2, 10}, {-1, 9}, {0, 7}}, max1(s.u/2)*2, sMid)
+	// Body: upright with a ridged belly.
+	s.blob(0, 1, 4, 6, sMid)
+	s.arc(-1, 3, 3, 2, sDark) // belly ridges
+	s.arc(-1, 5, 3, 2, sDark)
+	s.arc(-1, 1, 3, 2, sDark)
+	// Dorsal fin on the back.
+	s.blade(4, 0, 1, 3, false, sUp)
+	// Head angled left with a tube snout.
+	s.blob(-2, -6, 3, 3, sMid)
+	s.stroke(-5, -6, -9, -5, max1(s.u/2)*2, sUp) // tube snout
+	// Coronet crest.
+	s.blade(-2, -9, 1, 2, false, sUp)
+	s.blade(0, -10, 1, 2, false, sUp)
+	s.eye(-3, -7, false)
+}
+
+func spriteGulper(s *spriteCtx) {
+	// An anglerfish in profile facing left: a huge head that IS the body, a
+	// gaping underbite jaw full of teeth, a glowing lure dangling ahead.
+	// Tail fin (right).
+	s.snout(8, 1, 1, 3, 1, sMid)
+	s.blade(10, -1, 1, 3, false, sMid)
+	s.blade(10, 3, 1, 3, true, sMid)
+	// Body/head.
+	s.blob(1, 1, 8, 6, sMid)
+	// The gaping mouth: dark wedge opening left, teeth both rows.
+	s.oval(s.cx-5*s.u, s.cy+3*s.u, 5*s.u, 3*s.u, sOutline)
+	s.oval(s.cx-5*s.u, s.cy+3*s.u, 5*s.u-1, 3*s.u-1, sDark)
+	s.teeth(-6, 1, 3, 4, true)
+	s.teeth(-6, 6, 3, 3, false)
+	// Lure: stalk arcing forward from the forehead, glowing bulb.
+	s.tailSeg([][2]int{{0, -6}, {-4, -9}, {-8, -7}}, max1(s.u/2), sLow)
+	s.c.FillCircle(s.cx-8*s.u, s.cy-6*s.u, max1(s.u/2)+1, sGlint)
+	// Pectoral fin + speckle.
+	s.blade(3, 8, 2, 3, true, sLow)
+	s.speckle(3, -1, 4, 2, 3)
+	s.eye(-4, -2, true)
+}
+
+func spriteFrostnip(s *spriteCtx) {
+	// A penguin: upright egg, white belly, flipper wings, an orange-less
+	// little beak and webbed feet — frost sparkles at its crown.
+	// Body.
+	s.blob(0, 2, 5, 8, sMid)
+	// Belly: big pale oval.
+	s.patch(0, 4, 3, 5, sTop)
+	// Flippers.
+	s.blade(-6, 1, 1, 5, true, sLow)
+	s.blade(6, 1, 1, 5, true, sLow)
+	// Face: eyes high on the dark hood, beak between.
+	s.eye(-2, -3, false)
+	s.eye(2, -3, false)
+	s.triAt(s.cx, s.cy-1*s.u, s.u, s.u+1, true, sUp) // beak
+	// Frost crystals at the crown.
+	s.blade(0, -8, 1, 2, false, sGlint)
+	s.dot2(-3, -8, sGlint)
+	s.dot2(3, -8, sGlint)
+	// Webbed feet.
+	s.patch(-2, 10, 2, 1, sUp)
+	s.patch(2, 10, 2, 1, sUp)
+}
+
+func spriteAnchora(s *spriteCtx) {
+	// An octopus: a tall dome mantle with big ring eyes and four curling
+	// tentacles — an anchor emblem marks the dome.
+	// Tentacles: curls spreading from under the mantle.
+	s.tailSeg([][2]int{{-5, 4}, {-8, 7}, {-10, 6}}, max1(s.u/2)*2, sMid)
+	s.tailSeg([][2]int{{-2, 5}, {-3, 9}, {-5, 10}}, max1(s.u/2)*2, sMid)
+	s.tailSeg([][2]int{{2, 5}, {3, 9}, {5, 10}}, max1(s.u/2)*2, sMid)
+	s.tailSeg([][2]int{{5, 4}, {8, 7}, {10, 6}}, max1(s.u/2)*2, sMid)
+	// Curl tips.
+	s.dot2(-10, 5, sUp)
+	s.dot2(10, 5, sUp)
+	// Mantle: tall dome.
+	s.blob(0, -1, 6, 6, sMid)
+	// Anchor emblem on the dome.
+	s.stroke(0, -6, 0, -1, max1(s.u/3), sUp)
+	s.stroke(-2, -5, 2, -5, max1(s.u/3), sUp)
+	s.stroke(0, -1, -2, -3, max1(s.u/3), sUp)
+	s.stroke(0, -1, 2, -3, max1(s.u/3), sUp)
+	// Big ring eyes low on the mantle.
+	s.ringEye(-3, 2, 2)
+	s.ringEye(3, 2, 2)
+	// A little siphon mouth.
+	s.dot(0, 4)
 }
 
 // dot2 sets a small filled disc at a design offset (a petal, spark or rivet).

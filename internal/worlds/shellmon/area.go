@@ -10,9 +10,11 @@ import "github.com/shellbound/shellbound/internal/render/sprites"
 
 const (
 	areaOakhaven    = "oakhaven"     // start town
-	areaRoute1      = "route1"       // the wild route
-	areaTidewell    = "tidewell"     // end town
+	areaRoute1      = "route1"       // the wild route east
+	areaTidewell    = "tidewell"     // seaside town
 	areaTidewellGym = "tidewell_gym" // the gym interior
+	areaRoute2      = "route2"       // the wooded route north
+	areaBellhollow  = "bellhollow"   // the market town
 	startArea       = areaOakhaven
 )
 
@@ -71,6 +73,10 @@ func buildArea(key string) *routeState {
 		return areaTidewellBuild()
 	case areaTidewellGym:
 		return areaTidewellGymBuild()
+	case areaRoute2:
+		return areaRoute2Build()
+	case areaBellhollow:
+		return areaBellhollowBuild()
 	default:
 		return areaOakhavenBuild()
 	}
@@ -209,8 +215,9 @@ func (a *routeState) stamp() {
 	for _, w := range a.warps {
 		a.set(w.x, w.y, '.')
 	}
-	for _, n := range a.npcs {
-		a.set(n.x, n.y, '.')
+	for i := range a.npcs {
+		a.set(a.npcs[i].x, a.npcs[i].y, '.')
+		a.npcs[i].hx, a.npcs[i].hy = a.npcs[i].x, a.npcs[i].y // roam home
 	}
 	for _, tr := range a.trainers {
 		a.set(tr.x, tr.y, '.')
@@ -250,14 +257,21 @@ func areaOakhavenBuild() *routeState {
 	a.set(3, 11, 'e')
 	a.set(6, 11, 'e')
 
-	a.warps = []warp{{x: 22, y: 7, dest: areaRoute1, dx: 1, dy: 6}}
+	a.set(3, 4, 'b')  // a bench by the western cottage
+	a.set(20, 9, 'l') // a lamp post
+
+	a.warps = []warp{
+		{x: 22, y: 7, dest: areaRoute1, dx: 1, dy: 6},
+		{x: 11, y: 0, dest: areaRoute2, dx: 10, dy: 13}, // north gate to Route 2
+	}
 	a.npcs = []npc{
 		{x: 5, y: 7, name: "Mom", line: "Rest your team on the pad by the eastern cottage before you set out, dear.", facing: sprites.FaceDown},
-		{x: 14, y: 7, name: "Old Conch", line: "East lies Route 1. Mind the trainers lurking in the tall grass.", facing: sprites.FaceRight},
+		{x: 14, y: 7, name: "Old Conch", line: "East lies Route 1; north through the woods lies Bellhollow market.", facing: sprites.FaceRight},
+		{x: 8, y: 9, name: "Pip", line: "I'm not lost — I'm exploring! There's berries up on Route 2.", facing: sprites.FaceDown, roam: true},
 	}
 	a.signs = []sign{
 		{x: 9, y: 3, text: "Oakhaven — a quiet shell of a town. Make a wish at the well!"},
-		{x: 20, y: 6, text: "Route 1 ahead. Tidewell lies beyond the grass."},
+		{x: 20, y: 6, text: "Route 1 east · Route 2 north"},
 	}
 	a.roughen(1)
 	a.stamp()
@@ -420,6 +434,104 @@ func areaTidewellGymBuild() *routeState {
 			team:   []teamMon{{"dripling", 9}, {"brineback", 10}, {"tidecoil", 12}},
 			reward: "captain", rewardN: "Captain's Cap", badge: "coral"},
 	}
+	a.stamp()
+	return a
+}
+
+func areaRoute2Build() *routeState {
+	// Route 2 — a quiet wooded lane climbing north from Oakhaven to Bellhollow.
+	// A vertical dirt path threads short grass past two tall-grass thickets and a
+	// little pond, with a berry that tags along and a hidden trinket in the trees.
+	a := parseArea(areaRoute2, "Route 2", baseField(21, 15))
+	a.spawnX, a.spawnY = 10, 13
+
+	a.vrun('.', 10, 1, 13) // the path spine (north & south gates at the ends)
+
+	// Tall-grass thickets (the only encounter tiles).
+	a.rect(',', 2, 3, 7, 6)
+	a.rect(',', 13, 8, 18, 11)
+	// A pond in the northeast, and scattered scenery.
+	a.rect('~', 14, 2, 17, 4)
+	a.set(4, 10, 'o')
+	a.set(16, 6, 'o')
+	a.set(6, 11, 'f')
+	// A ledge tucked to the west as an optional shortcut down.
+	a.hrun('j', 3, 6, 8)
+
+	a.encounters = true
+	a.lvlMin, a.lvlMax = 5, 9
+	a.wildPool = []string{"sprigling", "fernling", "pricklepup", "cindle", "flickit", "frostnip"}
+	a.rareSpecies, a.rareLevel, a.rareChance = "bloomback", 12, 0.06
+	a.warps = []warp{
+		{x: 10, y: 14, dest: areaOakhaven, dx: 11, dy: 1},
+		{x: 10, y: 0, dest: areaBellhollow, dx: 12, dy: 14},
+	}
+	a.trainers = []trainer{
+		{id: "r2-sol", name: "Camper Sol", intro: "Nice day for a battle on the trail!", defeat: "Well hiked, well fought.",
+			x: 6, y: 5, facing: sprites.FaceRight, sight: 3, team: []teamMon{{"cindle", 8}, {"pricklepup", 8}}},
+		{id: "r2-mira", name: "Picnicker Mira", intro: "You'll not pass my patch unchallenged!", defeat: "Go on then, enjoy Bellhollow.",
+			x: 14, y: 10, facing: sprites.FaceLeft, sight: 3, team: []teamMon{{"dripling", 7}, {"fernling", 9}}},
+	}
+	a.signs = []sign{
+		{x: 9, y: 12, text: "ROUTE 2 — Bellhollow market lies north through the woods."},
+	}
+	a.items = []hiddenItem{
+		{id: "r2-berry", x: 3, y: 4, visible: true, msg: "A hungry Pricklepup was nibbling berries — it joins you!", creature: "pricklepup", level: 6},
+		{id: "r2-visor", x: 17, y: 11, visible: false, msg: "Tucked in the grass: a Sun Visor!", cosmetic: "visor", cosmeticName: "Sun Visor"},
+	}
+	a.roughen(4)
+	a.stamp()
+	return a
+}
+
+func areaBellhollowBuild() *routeState {
+	// Bellhollow — a bustling inland market town: a windmill on the rise, a row of
+	// awninged stalls around a paved square, benches and lamp posts, cottage
+	// gardens and a duck pond. Villagers wander the streets. Its one gate (south)
+	// leads back to Route 2.
+	a := parseArea(areaBellhollow, "Bellhollow", baseField(25, 16))
+	a.spawnX, a.spawnY = 12, 14
+
+	// Streets: a main north–south street and a market cross-street.
+	a.vrun('.', 12, 1, 14)
+	a.hrun('.', 1, 23, 8)
+	a.rect('.', 8, 5, 16, 11) // the market square
+
+	// The windmill landmark and a row of market stalls.
+	a.set(20, 3, 'm')
+	for _, p := range [][2]int{{9, 6}, {12, 6}, {15, 6}} {
+		a.set(p[0], p[1], 'k')
+	}
+	// Benches, lamps and cottages around the green.
+	a.set(9, 10, 'b')
+	a.set(15, 10, 'b')
+	a.set(7, 8, 'l')
+	a.set(17, 8, 'l')
+	for _, p := range [][2]int{{3, 2}, {21, 2}, {3, 13}, {21, 13}} {
+		a.set(p[0], p[1], 'B')
+	}
+	a.set(12, 3, 'H') // rest pad up the main street
+	// Cottage gardens and a duck pond.
+	for _, p := range [][2]int{{4, 4}, {20, 6}, {5, 12}, {19, 12}} {
+		a.set(p[0], p[1], 'f')
+	}
+	a.rect('~', 3, 9, 5, 11)
+
+	a.warps = []warp{{x: 12, y: 15, dest: areaRoute2, dx: 10, dy: 1}}
+	a.npcs = []npc{
+		{x: 11, y: 7, name: "Greengrocer Fen", line: "Fresh from Route 2! Berries, bulbs, the lot.", facing: sprites.FaceDown},
+		{x: 14, y: 9, name: "Miller Bram", line: "The old mill still grinds the town's flour — hear it turn?", facing: sprites.FaceLeft, roam: true},
+		{x: 8, y: 11, name: "Tessa", line: "Bellhollow's the friendliest town in the region, no contest!", facing: sprites.FaceRight, roam: true},
+		{x: 18, y: 7, name: "Runabout Kit", line: "Race you round the square! …later, maybe.", facing: sprites.FaceUp, roam: true},
+	}
+	a.signs = []sign{
+		{x: 12, y: 12, text: "Welcome to BELLHOLLOW — market town of the vale."},
+		{x: 6, y: 8, text: "Market square · mind the stalls."},
+	}
+	a.items = []hiddenItem{
+		{id: "bh-ribbon", x: 22, y: 10, visible: false, msg: "Behind a stall you find a Ribbon Bow!", cosmetic: "bow", cosmeticName: "Ribbon Bow"},
+	}
+	a.roughen(5)
 	a.stamp()
 	return a
 }

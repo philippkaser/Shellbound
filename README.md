@@ -207,18 +207,22 @@ Enter on a name pre-fills a `/w` to them.
   portal's own colour, so a world and its gateway look like one place. The
   **Shellmon** portal leads to a **creature collector** (`internal/worlds/
   shellmon`): pick one of three starters, then set out across a little
-  **overworld** — the starting town of **Oakhaven**, **Route 1**, and the
-  seaside town of **Tidewell** at the far end — linked by edge warps, each with
-  its own charm and an irregular, hand-carved treeline (no strict rectangles).
-  Oakhaven is a cozy inland village around a stone wishing-well, with cottages, a
-  fenced paddock and flower beds; Tidewell is a seaside port that opens straight
-  onto the **open ocean** to the south — no treeline there, the sea is the map
-  edge — fronted by a sandy shore, a wooden fishing pier and a striped
-  lighthouse. The towns are paved and lawned (no wild grass, so nothing spawns in
-  them), with rest/heal pads, signs to read and NPCs to bump for a line. Route 1
-  is drawn in the Pokémon idiom: a dirt path threading short grass past defined
-  patches of tall grass (the only tiles that hide wild Shellmon) and a ledge you
-  can hop down but not climb back up. Three **trainers** challenge you — on
+  **overworld** that branches from **Oakhaven**: east through **Route 1** to the
+  seaside town of **Tidewell**, and north through **Route 2** to the market town
+  of **Bellhollow** — five hand-built areas (plus the gym interior) linked by
+  edge warps, each with its own charm and an irregular, hand-carved treeline (no
+  strict rectangles). Oakhaven is a cozy inland village around a stone
+  wishing-well, with cottages, a fenced paddock and flower beds; Tidewell is a
+  seaside port that opens straight onto the **open ocean** to the south — no
+  treeline there, the sea is the map edge — fronted by a sandy shore, a wooden
+  fishing pier and a striped lighthouse; Bellhollow is a bustling market town
+  with a turning **windmill**, a row of awninged **stalls**, benches, glowing
+  lamp posts, cottage gardens and a duck pond, its streets walked by **villagers
+  who wander** about. The towns are paved and lawned (no wild grass, so nothing
+  spawns in them), with rest/heal pads, signs to read and NPCs to bump for a
+  line. The routes are drawn in the Pokémon idiom: a dirt path threading short
+  grass past defined patches of tall grass (the only tiles that hide wild
+  Shellmon) and ledges you can hop down but not climb back up. Three **trainers** challenge you — on
   contact or down their line of sight through the grass — each a real 6v6 battle
   that stays won once beaten; the toughest, a rumored ace who trains in the
   northeast grass, drops the *Wanderer's Halo*. Tidewell has the region's first
@@ -292,14 +296,15 @@ Enter on a name pre-fills a `/w` to them.
   pipelines.
 - **Done** — Shellmon **PvP**: challenge a nearby player from their inspect card
   and fight 6v6 over the hub with the same engine.
-- **Done** — a Shellmon **overworld**: two towns (one opening onto the ocean)
-  and a wild Route 1 with line-of-sight trainer battles, ledges, a
-  reward-dropping ace, hidden secrets, and the first **gym** (an indoor hall
-  with junior trainers and Leader Pearl for the Coral Badge) — all linked by
-  warps with per-player progress in the save.
-- **Later** — more routes and towns and gyms for Shellmon; spectating duels;
-  the Doom portal doing whatever a terminal can get away with; player-placed
-  decorations; moderation tools.
+- **Done** — a Shellmon **overworld** that branches from Oakhaven: three towns
+  (a seaside port opening onto the ocean and a bustling market town with a
+  windmill, stalls and wandering villagers) and two wild routes with
+  line-of-sight trainer battles, ledges, a reward-dropping ace, hidden secrets,
+  and the first **gym** (a water-current puzzle hall with Leader Pearl for the
+  Coral Badge) — all linked by warps with per-player progress in the save.
+- **Later** — more towns and gyms; enterable building interiors (a Shellmon
+  Center, shops); spectating duels; the Doom portal doing whatever a terminal
+  can get away with; player-placed decorations; moderation tools.
 
 ## Repository layout
 

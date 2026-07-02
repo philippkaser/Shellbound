@@ -4,6 +4,8 @@ package shellmon
 // split out of route.go, which keeps the world state and movement logic.
 
 import (
+	"math"
+
 	"github.com/shellbound/shellbound/internal/render/canvas"
 	"github.com/shellbound/shellbound/internal/render/iso"
 	"github.com/shellbound/shellbound/internal/render/sprites"
@@ -135,6 +137,83 @@ func drawFence(c *canvas.Canvas, footX, footY int) {
 	c.VLine(footX+9, footY-11, footY-1, canvas.Color(0x5A4A38))
 	c.HLine(footX-9, footX+9, footY-10, canvas.Color(0x6C5A44))
 	c.HLine(footX-9, footX+9, footY-5, canvas.Color(0x6C5A44))
+}
+
+// drawStall paints a little market stall: a counter under a striped awning on
+// two posts — the heart of a market town.
+func drawStall(c *canvas.Canvas, footX, footY int) {
+	drawContactShadow(c, footX, footY)
+	// Counter.
+	c.FillRect(footX-12, footY-12, 24, 12, canvas.Color(0x6A5640))
+	c.FillRect(footX-12, footY-12, 24, 2, canvas.Color(0x836C50))
+	c.Rect(footX-12, footY-12, 24, 12, canvas.Color(0x2E2419))
+	// Posts.
+	c.VLine(footX-12, footY-30, footY-12, canvas.Color(0x4A3C2C))
+	c.VLine(footX+12, footY-30, footY-12, canvas.Color(0x4A3C2C))
+	// Striped awning (alternating light/dark bands).
+	for dx := -15; dx <= 15; dx++ {
+		tone := canvas.Color(0xD8D8D8)
+		if ((dx+15)/4)%2 == 0 {
+			tone = canvas.Color(0x8A8A8A)
+		}
+		h := 5 - absi(dx)/6
+		c.VLine(footX+dx, footY-30, footY-30+h+3, tone)
+	}
+	c.HLine(footX-15, footX+15, footY-30, canvas.Color(0x2E2419))
+}
+
+// drawBench paints a simple slatted park bench.
+func drawBench(c *canvas.Canvas, footX, footY int) {
+	drawContactShadow(c, footX, footY)
+	c.FillRect(footX-10, footY-6, 20, 3, canvas.Color(0x6C5A44))  // seat
+	c.FillRect(footX-10, footY-13, 20, 2, canvas.Color(0x6C5A44)) // back rail
+	c.VLine(footX-9, footY-13, footY, canvas.Color(0x4A3C2C))
+	c.VLine(footX+9, footY-13, footY, canvas.Color(0x4A3C2C))
+}
+
+// drawLamp paints a lamp post with a softly glowing head.
+func drawLamp(c *canvas.Canvas, footX, footY int) {
+	c.VLine(footX, footY-26, footY, canvas.Color(0x4A4A4A))  // post
+	c.FillCircle(footX, footY-29, 3, canvas.Color(0xF4EEC8)) // warm glow
+	c.Set(footX, footY-29, canvas.Color(0xFFFFFF))           // hot center
+}
+
+// drawWindmill paints a charming windmill: a tapered tower with four turning
+// sails — a landmark for the market town.
+func drawWindmill(c *canvas.Canvas, footX, footY int, t float64) {
+	drawContactShadow(c, footX, footY)
+	const H = 52
+	// Tapered stone tower.
+	for y := 0; y <= H; y++ {
+		f := float64(y) / float64(H)
+		half := int(12 - 5*f)
+		tone := canvas.Color(0xA6A6A6)
+		if f > 0.5 {
+			tone = canvas.Color(0x8C8C8C)
+		}
+		for dx := -half; dx <= half; dx++ {
+			col := tone
+			if dx < -half/3 {
+				col = col.Scale(0.7)
+			}
+			c.Set(footX+dx, footY-y, col)
+		}
+	}
+	// Conical cap.
+	top := footY - H
+	fillTriangle(c, [2]int{footX - 9, top}, [2]int{footX + 9, top}, [2]int{footX, top - 12}, canvas.Color(0x6A5A44))
+	// Four turning sails from the hub near the cap.
+	hubX, hubY := footX, top+2
+	for i := 0; i < 4; i++ {
+		ang := t*0.9 + float64(i)*math.Pi/2
+		ex := hubX + int(math.Cos(ang)*20)
+		ey := hubY + int(math.Sin(ang)*20)
+		drawRidge(c, [2]int{hubX, hubY}, [2]int{ex, ey}, canvas.Color(0xE0E0E0))
+		// a thin blade offset for width
+		ox, oy := int(-math.Sin(ang)*3), int(math.Cos(ang)*3)
+		drawRidge(c, [2]int{hubX + ox, hubY + oy}, [2]int{ex + ox, ey + oy}, canvas.Color(0x9A9A9A))
+	}
+	c.FillCircle(hubX, hubY, 2, canvas.Color(0x3A3A3A))
 }
 
 // drawLedge paints a low earthen ledge (a single-tile drop you can hop down).

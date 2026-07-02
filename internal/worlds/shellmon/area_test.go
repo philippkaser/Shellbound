@@ -8,7 +8,7 @@ import (
 )
 
 // allAreas is every area key the overworld can build.
-var allAreas = []string{areaOakhaven, areaRoute1, areaTidewell, areaTidewellGym}
+var allAreas = []string{areaOakhaven, areaRoute1, areaTidewell, areaTidewellGym, areaRoute2, areaBellhollow}
 
 // TestAreasBuild checks each area constructs with a uniform-width grid and a
 // walkable spawn cell.

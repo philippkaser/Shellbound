@@ -20,6 +20,10 @@ type npc struct {
 	name   string
 	line   string
 	facing sprites.Facing
+	roam   bool      // wanders gently around its home cell
+	hx, hy int       // home cell (roamers stay within a couple tiles)
+	moving bool      // currently taking a step (for the walk animation)
+	step   time.Time // when the last roam step began
 }
 
 // routeState is one walkable area (a town or route): its tiles, the player's
@@ -272,6 +276,40 @@ func (m *model) resolveLanding() {
 // say shows a transient line in the overworld speech panel.
 func (m *model) say(text string) { m.routeMsg, m.routeMsgAt = text, time.Now() }
 
+// roamNPCs gently wanders any roaming NPCs a step around their home cell, on a
+// slow cadence so towns feel alive without anyone darting about. It respects
+// walls, other entities and the player, and keeps each roamer within a couple of
+// tiles of home.
+func (m *model) roamNPCs() {
+	r := m.route
+	if r == nil {
+		return
+	}
+	now := time.Now()
+	if now.Sub(m.roamAt) < 600*time.Millisecond {
+		return
+	}
+	m.roamAt = now
+	dirs := [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+	faces := [4]sprites.Facing{sprites.FaceRight, sprites.FaceLeft, sprites.FaceDown, sprites.FaceUp}
+	for i := range r.npcs {
+		n := &r.npcs[i]
+		if !n.roam || m.rng.Float64() < 0.45 { // often pause
+			continue
+		}
+		k := m.rng.Intn(4)
+		nx, ny := n.x+dirs[k][0], n.y+dirs[k][1]
+		n.facing = faces[k] // face the way it tries, even if blocked
+		if absi(nx-n.hx) > 2 || absi(ny-n.hy) > 2 {
+			continue
+		}
+		if r.blocks(nx, ny) || (nx == r.px && ny == r.py) {
+			continue
+		}
+		n.x, n.y, n.moving, n.step = nx, ny, true, now
+	}
+}
+
 // itemAt returns the pickup on a cell, if any.
 func (r *routeState) itemAt(x, y int) *hiddenItem {
 	for i := range r.items {
@@ -399,6 +437,10 @@ const (
 	kindLedge
 	kindWall
 	kindGym
+	kindStall
+	kindBench
+	kindLamp
+	kindWindmill
 )
 
 // tileProp captures a map tile's behavior in one place: whether it stops
@@ -423,6 +465,11 @@ var tileProps = map[byte]tileProp{
 	'X': {solid: true, tall: kindWall},
 	'G': {solid: true, tall: kindGym},
 	'~': {solid: true}, // deep water: solid, drawn on the ground plane
+	// Town charm props.
+	'k': {solid: true, tall: kindStall},
+	'b': {solid: true, tall: kindBench},
+	'l': {solid: true, tall: kindLamp},
+	'm': {solid: true, tall: kindWindmill},
 	// Walkable ground.
 	'.': {}, ',': {}, 'f': {}, 'g': {}, 's': {}, 'P': {}, 'H': {},
 	'<': {}, '>': {}, '^': {}, 'v': {},
@@ -566,14 +613,23 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 			drawWall(m.scr, o.px, o.py)
 		case kindGym:
 			drawGym(m.scr, o.px, o.py)
+		case kindStall:
+			drawStall(m.scr, footX, footY)
+		case kindBench:
+			drawBench(m.scr, footX, footY)
+		case kindLamp:
+			drawLamp(m.scr, footX, footY)
+		case kindWindmill:
+			drawWindmill(m.scr, footX, footY, t)
 		case kindSign:
 			drawSign(m.scr, footX, footY)
 		case kindItem:
 			drawItemBall(m.scr, footX, footY, t)
 		case kindNPC:
-			_, nbob := sprites.Pose(t, false, float64(o.n.x+o.n.y))
+			nmoving := time.Since(o.n.step) < 400*time.Millisecond
+			frame, nbob := sprites.Pose(t, nmoving, float64(o.n.x+o.n.y))
 			drawContactShadow(m.scr, footX, footY)
-			sprites.Draw(m.scr, footX, footY+nbob, o.n.facing, 0, false)
+			sprites.Draw(m.scr, footX, footY+nbob, o.n.facing, frame, nmoving)
 			drawNameTag(m.scr, footX, footY+nbob, o.n.name, 0xB8B8B8)
 		case kindTrainer:
 			_, nbob := sprites.Pose(t, false, float64(o.tr.x*2+o.tr.y))

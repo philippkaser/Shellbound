@@ -129,6 +129,8 @@ type model struct {
 	awardBadge string    // badge id being presented
 	awardAt    time.Time // when the award animation started
 
+	roamAt time.Time // last time wandering NPCs took a step
+
 	trans transition // screen wipe between Shellmon screens
 }
 
@@ -143,6 +145,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.render()
 		return m, nil
 	case tickMsg:
+		if m.state == stateRoute {
+			m.roamNPCs()
+		}
 		m.render()
 		return m, tick()
 	case tea.KeyMsg:

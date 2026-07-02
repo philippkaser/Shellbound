@@ -61,6 +61,25 @@ func tick() tea.Cmd {
 	return tea.Tick(tickEvery, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// moveIntent carries the held movement key so motion integrates smoothly on
+// the tick instead of stuttering with the terminal's key-repeat cadence —
+// the same tap-window/hold-steady liveness scheme the plaza walk uses. The
+// terminal only auto-repeats the last key, so one intent suffices.
+type moveIntent struct {
+	fwd, str, trn float64 // -1, 0 or +1 per axis
+	seen          time.Time
+	count         int // presses seen for this intent (1 = maybe just a tap)
+}
+
+// Intent liveness windows and per-tick speeds (tick = 50ms).
+const (
+	tapWindow  = 90 * time.Millisecond  // a lone tap expires quickly (~one extra tick of glide)
+	holdSteady = 260 * time.Millisecond // repeats keep the hold alive
+	tickFwd    = 0.13
+	tickStrafe = 0.11
+	tickTurn   = 0.085
+)
+
 type model struct {
 	ctx       world.Context
 	key, name string
@@ -77,6 +96,7 @@ type model struct {
 	start     time.Time
 	granted   bool
 	exiting   bool
+	intent    moveIntent
 }
 
 // Init implements tea.Model.
@@ -90,6 +110,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.render()
 		return m, nil
 	case tickMsg:
+		m.applyIntent()
 		m.g.tick()
 		if m.g.state == won && !m.granted {
 			m.granted = true
@@ -131,23 +152,73 @@ func (m *model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case " ", "space":
 			m.g.fire()
 		case "w", "up":
-			m.g.forward(moveStep)
+			m.press(1, 0, 0)
 		case "s", "down":
-			m.g.forward(-moveStep)
+			m.press(-1, 0, 0)
 		case "a":
-			m.g.strafe(strafeStep)
+			m.press(0, 1, 0)
 		case "d":
-			m.g.strafe(-strafeStep)
+			m.press(0, -1, 0)
 		case "left", "q":
-			m.g.turn(-turnStep)
+			m.press(0, 0, -1)
 		case "right", "e":
-			m.g.turn(turnStep)
+			m.press(0, 0, 1)
 		default:
 			return m, nil
 		}
 		m.render()
 	}
 	return m, nil
+}
+
+// press records a movement key. The first press of a direction steps
+// immediately (input feels instant); while it stays fresh, applyIntent keeps
+// the motion flowing on the steady tick so a held key glides instead of
+// stuttering with the OS key-repeat.
+func (m *model) press(fwd, str, trn float64) {
+	fresh := time.Since(m.intent.seen) <= holdSteady
+	same := m.intent.fwd == fwd && m.intent.str == str && m.intent.trn == trn
+	if same && fresh {
+		m.intent.count++
+		m.intent.seen = time.Now()
+		return
+	}
+	m.intent = moveIntent{fwd: fwd, str: str, trn: trn, seen: time.Now(), count: 1}
+	// Immediate response to the first press.
+	if fwd != 0 {
+		m.g.forward(fwd * moveStep)
+	}
+	if str != 0 {
+		m.g.strafe(str * strafeStep)
+	}
+	if trn != 0 {
+		m.g.turn(trn * turnStep)
+	}
+}
+
+// applyIntent integrates held movement each tick while the intent is live: a
+// lone tap expires within tapWindow (so it moves exactly one step), while a
+// key whose repeats have begun stays live within holdSteady of the last one.
+func (m *model) applyIntent() {
+	if m.g.state != playing || m.intent.seen.IsZero() {
+		return
+	}
+	window := tapWindow
+	if m.intent.count >= 2 {
+		window = holdSteady
+	}
+	if time.Since(m.intent.seen) > window {
+		return
+	}
+	if m.intent.fwd != 0 {
+		m.g.forward(m.intent.fwd * tickFwd)
+	}
+	if m.intent.str != 0 {
+		m.g.strafe(m.intent.str * tickStrafe)
+	}
+	if m.intent.trn != 0 {
+		m.g.turn(m.intent.trn * tickTurn)
+	}
 }
 
 // render composes a frame and ships it to the session.

@@ -26,7 +26,7 @@ func (m *model) build(t float64) string {
 	m.drawWorld(pw, ph, t)
 	m.drawSprites(pw, ph, t)
 	m.drawWeapon(pw, ph, t)
-	m.drawHUD(pw, ph)
+	m.drawHUD(pw, ph, t)
 	m.drawBanner(pw, ph)
 	return m.place(left, top)
 }
@@ -60,14 +60,16 @@ func (m *model) drawWorld(pw, ph int, t float64) {
 	flicker := 1 + 0.05*math.Sin(t*6.3) + 0.03*math.Sin(t*11.7)
 
 	// Ceiling fades to black overhead; floor brightens toward the camera.
+	// The muzzle flash pools near the camera (rows far from the horizon)
+	// instead of flooding the whole hall uniformly.
 	for y := 0; y < horizon; y++ {
 		k := float64(horizon-y) / float64(horizon)
-		v := uint8(clamp01((34*(1-k))/255*flicker+flash) * 255)
+		v := uint8(clamp01((34*(1-k))/255*flicker+flash*k*k) * 255)
 		m.scr.HLine(0, pw-1, y, canvas.RGB(v, v, v))
 	}
 	for y := horizon; y < ph; y++ {
 		k := float64(y-horizon) / float64(ph-horizon)
-		v := uint8(clamp01((18+46*k)/255*flicker+flash*0.7) * 255)
+		v := uint8(clamp01((18+46*k)/255*flicker+flash*0.8*k*k) * 255)
 		m.scr.HLine(0, pw-1, y, canvas.RGB(v, v, v))
 	}
 
@@ -153,7 +155,7 @@ func (m *model) drawWorld(pw, ph int, t float64) {
 		wallX -= math.Floor(wallX)
 		seam := wallX < 0.045 || wallX > 0.955
 
-		torch := g.torches[mapY][mapX]
+		torch := inb(mapX, mapY) && g.torches[mapY][mapX]
 		tflick := 0.75 + 0.25*math.Sin(t*9+float64(mapX*7+mapY*13))
 		accent := m.accent(0.6)
 
@@ -176,7 +178,7 @@ func (m *model) drawWorld(pw, ph int, t float64) {
 			if seam {
 				l *= 0.7
 			}
-			l += flash
+			l += flash * fog // the flash fades with wall distance
 			v := uint8(clamp01(l) * 255)
 			col := canvas.RGB(v, v, v)
 			if torch {
@@ -395,7 +397,7 @@ func (m *model) drawWeapon(pw, ph int, t float64) {
 	}
 }
 
-func (m *model) drawHUD(pw, ph int) {
+func (m *model) drawHUD(pw, ph int, t float64) {
 	g := m.g
 	cx, cy := pw/2, ph/2
 	col := m.accent(0.6)
@@ -403,6 +405,14 @@ func (m *model) drawHUD(pw, ph int) {
 	m.scr.HLine(cx+3, cx+7, cy, col)
 	m.scr.VLine(cx, cy-7, cy-3, col)
 	m.scr.VLine(cx, cy+3, cy+7, col)
+
+	// A connecting shot flashes an X of white ticks around the crosshair.
+	if g.hitMark > 0 {
+		mk := canvas.RGB(240, 240, 240)
+		for _, d := range [4][2]int{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}} {
+			m.scr.Line(cx+d[0]*4, cy+d[1]*4, cx+d[0]*7, cy+d[1]*7, mk)
+		}
+	}
 
 	m.scr.DrawTextShadow(6, 5, "DOOM", 0xF2F2F2, 0x000000)
 	stat := fmt.Sprintf("health %d   imps %d/%d", g.health, g.kills, g.total)
@@ -415,9 +425,13 @@ func (m *model) drawHUD(pw, ph int) {
 	hint := "WASD move · ←/→ turn · space fire · Esc leave"
 	m.scr.DrawText(pw-canvas.TextWidth(hint)-6, ph-canvas.LineH-4, hint, 0x6E6E6E)
 
-	// A hit pulses an accent vignette around the edges.
+	// A hit pulses an accent vignette around the edges, and critical health
+	// keeps a slow warning pulse breathing there.
 	if g.hurtCool > hurtCoolTicks-3 && g.state == playing {
 		m.vignette(pw, ph, m.accent(0.5))
+	} else if g.health <= 30 && g.state == playing {
+		pulse := 0.25 + 0.2*math.Sin(t*3.2)
+		m.vignette(pw, ph, m.accent(0.5).Scale(pulse))
 	}
 }
 

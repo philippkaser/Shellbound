@@ -20,12 +20,14 @@ const (
 	turnStep   = 0.13 // radians per turn
 	fov        = 0.66 // camera-plane half-width (~66° field of view)
 
-	enemySpeed    = 0.05
+	enemySpeed    = 0.055
+	separation    = 0.6 // imps repel inside this range so they fan out
 	contactRange  = 0.7
 	lungeRange    = 1.8 // an imp rears up to strike inside this range
 	contactDmg    = 7
 	hurtCoolTicks = 10
 	muzzleTicks   = 5
+	hitMarkTicks  = 4 // crosshair flash frames after a connecting shot
 	deathTicks    = 9 // frames an imp spends collapsing after a kill
 	startHealth   = 100
 	shotDamage    = 50
@@ -63,6 +65,7 @@ type game struct {
 	kills, total int
 	hurtCool     int
 	muzzle       int
+	hitMark      int // crosshair hit-marker countdown
 	steps        int // move count, drives the weapon/view bob
 	state        runState
 }
@@ -178,6 +181,7 @@ func (g *game) fire() {
 		}
 	}
 	if best >= 0 {
+		g.hitMark = hitMarkTicks
 		g.enemies[best].hp -= shotDamage
 		g.enemies[best].hurt = 3
 		if g.enemies[best].hp <= 0 {
@@ -212,6 +216,9 @@ func (g *game) tick() {
 	if g.muzzle > 0 {
 		g.muzzle--
 	}
+	if g.hitMark > 0 {
+		g.hitMark--
+	}
 	for i := range g.enemies {
 		e := &g.enemies[i]
 		if !e.alive {
@@ -236,8 +243,26 @@ func (g *game) tick() {
 			}
 			continue
 		}
+		mx, my := 0.0, 0.0
 		if dist > 0 && g.los(e.x, e.y, g.posX, g.posY) {
-			nx, ny := e.x+dx/dist*enemySpeed, e.y+dy/dist*enemySpeed
+			mx, my = dx/dist*enemySpeed, dy/dist*enemySpeed
+		}
+		// Separation: imps repel each other so a pack fans out into a front
+		// instead of stacking on one point.
+		for j := range g.enemies {
+			if j == i || !g.enemies[j].alive {
+				continue
+			}
+			sx, sy := e.x-g.enemies[j].x, e.y-g.enemies[j].y
+			d := math.Hypot(sx, sy)
+			if d > 1e-4 && d < separation {
+				push := (separation - d) / separation * enemySpeed
+				mx += sx / d * push
+				my += sy / d * push
+			}
+		}
+		if mx != 0 || my != 0 {
+			nx, ny := e.x+mx, e.y+my
 			if !g.wall(nx, e.y) {
 				e.x = nx
 			}

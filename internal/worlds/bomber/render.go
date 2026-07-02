@@ -58,9 +58,15 @@ func (m *model) build(t, dt float64) string {
 	m.interpolate(dt)
 
 	// Center the arena in the viewport, nudged down for cube headroom at top.
+	// A fresh detonation (or taking a hit) jolts the camera for a few frames.
 	csx, csy := iso.Project(float64(cols-1)/2, float64(rows-1)/2)
 	ox := csx - float64(pw)/2
 	oy := csy - float64(ph)/2 - 18
+	if m.g.shake > 0 {
+		k := float64(m.g.shake) / shakeTicks
+		ox += math.Sin(t*93) * 3 * k
+		oy += math.Cos(t*71) * 2 * k
+	}
 
 	m.drawGround(ox, oy)
 	m.drawPowerups(ox, oy, t)
@@ -171,10 +177,10 @@ func (m *model) drawScene(ox, oy, t float64) {
 		switch it.kind {
 		case itWall:
 			px, py := proj(float64(it.x), float64(it.y), ox, oy)
-			iso.DrawCube(m.scr, px, py, wallH, wallTop, wallL, wallR)
+			iso.DrawCubeShaded(m.scr, px, py, wallH, wallTop, wallL, wallR)
 		case itCrate:
 			px, py := proj(float64(it.x), float64(it.y), ox, oy)
-			iso.DrawCube(m.scr, px, py, crateH, crateTop, crateL, crateR)
+			iso.DrawCubeShaded(m.scr, px, py, crateH, crateTop, crateL, crateR)
 			// A lid marking so crates read as breakable, not as walls.
 			m.scr.FillRect(px-4, py-crateH+iso.HH-2, 8, 4, crateLid)
 		case itBomb:
@@ -192,6 +198,7 @@ func (m *model) drawScene(ox, oy, t float64) {
 
 func (m *model) drawPlayer(footX, footY int, t float64) {
 	g := m.g
+	dropShadow(m.scr, footX, footY, 8, 4, 0.55)
 	// Blink while briefly invulnerable after a respawn.
 	if g.invuln > 0 && int(t*12)%2 == 0 {
 		return
@@ -229,9 +236,22 @@ func (m *model) drawBomb(footX, footY int, b bomb, t float64) {
 	}
 }
 
+// dropShadow darkens a soft 2:1 oval on the floor under a figure so it reads
+// grounded rather than floating over the tile.
+func dropShadow(c *canvas.Canvas, footX, footY, rx, ry int, k float64) {
+	for dy := -ry; dy <= ry; dy++ {
+		w := int(float64(rx) * math.Sqrt(math.Max(0, 1-float64(dy*dy)/float64(ry*ry))))
+		yy := footY + dy - 1
+		for dx := -w; dx <= w; dx++ {
+			c.Set(footX+dx, yy, c.At(footX+dx, yy).Scale(k))
+		}
+	}
+}
+
 // drawWisp is a floating dark orb with glowing eyes in the world's hue.
 func (m *model) drawWisp(footX, footY int, t float64, idx int) {
 	bob := int(2 * math.Sin(t*3+float64(idx)*1.7))
+	dropShadow(m.scr, footX, footY, 6, 3, 0.6)
 	cy := footY - 9 + bob
 	// faint trailing motes
 	for k := 1; k <= 2; k++ {

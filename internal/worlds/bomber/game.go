@@ -42,6 +42,7 @@ const (
 	blastTicks = 9  // how long a blast cell stays lethal
 	enemyCool  = 12 // ticks between enemy steps
 	respawnInv = 24 // post-respawn safety ticks
+	shakeTicks = 5  // camera-jolt frames after a detonation
 	enemyCount = 4
 )
 
@@ -62,6 +63,7 @@ type enemy struct {
 	x, y   int
 	fx, fy float64 // render-interpolated position
 	cool   int
+	pace   int // ticks between steps — varied per wisp so the pack staggers
 }
 
 // game is the pure arena state and rules; rendering reads it but never mutates.
@@ -81,6 +83,7 @@ type game struct {
 	reach    int
 	lives    int
 	invuln   int
+	shake    int // camera-jolt ticks after a detonation or a hit
 	state    runState
 
 	rnd *rand.Rand
@@ -125,7 +128,8 @@ func (g *game) build() {
 		if g.grid[y][x] != floor || abs(x-1)+abs(y-1) < 5 || g.enemyAt(x, y) != nil {
 			continue
 		}
-		g.enemies = append(g.enemies, enemy{x: x, y: y, fx: float64(x), fy: float64(y), cool: enemyCool})
+		pace := enemyCool - 2 + g.rnd.Intn(6) // staggered speeds per wisp
+		g.enemies = append(g.enemies, enemy{x: x, y: y, fx: float64(x), fy: float64(y), cool: pace, pace: pace})
 		placed++
 	}
 }
@@ -210,6 +214,9 @@ func (g *game) tick() {
 	if g.invuln > 0 {
 		g.invuln--
 	}
+	if g.shake > 0 {
+		g.shake--
+	}
 	// Age existing blasts.
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {
@@ -231,6 +238,7 @@ func (g *game) tick() {
 	}
 	if len(initial) > 0 {
 		g.detonate(initial)
+		g.shake = shakeTicks
 	}
 	g.compactBombs()
 	g.moveEnemies()
@@ -307,8 +315,60 @@ func (g *game) compactBombs() {
 	g.bombs = kept
 }
 
-// moveEnemies wanders each wisp one cell on its own cooldown, biased to keep
-// its heading so they don't jitter in place.
+// pursuitRange is the Manhattan distance inside which a wisp hunts the player.
+const pursuitRange = 7
+
+// dangerous reports whether a cell is (or is about to be) lethal: an active
+// blast, or in the cross of a bomb whose fuse is running out.
+func (g *game) dangerous(x, y int) bool {
+	if !g.inBounds(x, y) {
+		return true
+	}
+	if g.blast[y][x] > 0 {
+		return true
+	}
+	for i := range g.bombs {
+		b := &g.bombs[i]
+		if b.gone || b.fuse > fuseTicks/2 {
+			continue
+		}
+		if b.x == x && b.y == y {
+			return true
+		}
+		// Same row or column within reach, with no wall between.
+		if b.y == y && abs(b.x-x) <= b.reach {
+			clear := true
+			step := sign(x - b.x)
+			for cx := b.x + step; cx != x; cx += step {
+				if g.solid(cx, y) || g.grid[y][cx] == crate {
+					clear = false
+					break
+				}
+			}
+			if clear {
+				return true
+			}
+		}
+		if b.x == x && abs(b.y-y) <= b.reach {
+			clear := true
+			step := sign(y - b.y)
+			for cy := b.y + step; cy != y; cy += step {
+				if g.solid(x, cy) || g.grid[cy][x] == crate {
+					clear = false
+					break
+				}
+			}
+			if clear {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// moveEnemies steps each wisp on its own cadence. A wisp flees a cell that is
+// about to blow, hunts the player when they're near, and otherwise wanders —
+// so the arena has pressure without the wisps reading as psychic.
 func (g *game) moveEnemies() {
 	dirs := [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 	for i := range g.enemies {
@@ -317,17 +377,55 @@ func (g *game) moveEnemies() {
 			e.cool--
 			continue
 		}
-		e.cool = enemyCool
-		order := g.rnd.Perm(4)
-		for _, k := range order {
+		e.cool = e.pace
+		type cand struct {
+			x, y, dist int
+			danger     bool
+		}
+		var cands []cand
+		for _, k := range g.rnd.Perm(4) {
 			nx, ny := e.x+dirs[k][0], e.y+dirs[k][1]
 			if g.blockedForMove(nx, ny) || g.enemyAt(nx, ny) != nil {
 				continue
 			}
-			e.x, e.y = nx, ny
-			break
+			cands = append(cands, cand{nx, ny, abs(nx-g.px) + abs(ny-g.py), g.dangerous(nx, ny)})
 		}
+		if len(cands) == 0 {
+			continue
+		}
+		// If safe moves exist, never step into danger.
+		safe := cands[:0]
+		for _, c := range cands {
+			if !c.danger {
+				safe = append(safe, c)
+			}
+		}
+		pool := cands
+		if len(safe) > 0 {
+			pool = safe
+		}
+		// Standing on a fuse: sprint to any safe cell (nearest-to-player bias
+		// off, survival first). Otherwise hunt when the player is close.
+		best := pool[0]
+		if !g.dangerous(e.x, e.y) && abs(e.x-g.px)+abs(e.y-g.py) <= pursuitRange {
+			for _, c := range pool[1:] {
+				if c.dist < best.dist {
+					best = c
+				}
+			}
+		}
+		e.x, e.y = best.x, best.y
 	}
+}
+
+func sign(v int) int {
+	switch {
+	case v > 0:
+		return 1
+	case v < 0:
+		return -1
+	}
+	return 0
 }
 
 // damage applies blasts and contact to the player and wisps.
@@ -352,14 +450,51 @@ func (g *game) damage() {
 
 func (g *game) hit() {
 	g.lives--
+	g.shake = shakeTicks // the hit itself also jolts the camera
 	if g.lives <= 0 {
 		g.lives = 0
 		g.state = lost
 		return
 	}
-	g.px, g.py = 1, 1
-	g.pfx, g.pfy = 1, 1
+	// Respawn at the safest cell near the spawn corner rather than blindly
+	// at (1,1), which could drop the player straight onto a wisp or a blast.
+	g.px, g.py = g.safeSpawn()
+	g.pfx, g.pfy = float64(g.px), float64(g.py)
 	g.invuln = respawnInv
+}
+
+// safeSpawn breadth-first-searches from the spawn corner for the nearest
+// floor cell with no live blast, no imminent bomb cross, and no wisp within
+// two cells. Falls back to (1,1) if the whole arena is on fire.
+func (g *game) safeSpawn() (int, int) {
+	type pt struct{ x, y int }
+	visited := map[pt]bool{{1, 1}: true}
+	queue := []pt{{1, 1}}
+	dirs := [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		if g.grid[p.y][p.x] == floor && !g.dangerous(p.x, p.y) && g.bombAt(p.x, p.y) == nil {
+			clear := true
+			for i := range g.enemies {
+				if abs(g.enemies[i].x-p.x)+abs(g.enemies[i].y-p.y) < 3 {
+					clear = false
+					break
+				}
+			}
+			if clear {
+				return p.x, p.y
+			}
+		}
+		for _, d := range dirs {
+			n := pt{p.x + d[0], p.y + d[1]}
+			if g.inBounds(n.x, n.y) && !visited[n] && g.grid[n.y][n.x] != wall {
+				visited[n] = true
+				queue = append(queue, n)
+			}
+		}
+	}
+	return 1, 1
 }
 
 func (g *game) pickup() {

@@ -30,7 +30,7 @@ func TestRenderDoomPreviews(t *testing.T) {
 		m.drawWorld(pw, ph, 0.7)
 		m.drawSprites(pw, ph, 0.7)
 		m.drawWeapon(pw, ph, 0.7)
-		m.drawHUD(pw, ph)
+		m.drawHUD(pw, ph, 0.7)
 		m.drawBanner(pw, ph)
 
 		img := image.NewRGBA(image.Rect(0, 0, pw, ph))

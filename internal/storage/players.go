@@ -51,38 +51,44 @@ func (r *Players) SetCosmetic(id int64, key string) error {
 }
 
 // AddCoins credits n coins to a player and returns the new balance. n must be
-// positive.
+// positive. The UPDATE ... RETURNING makes credit-and-read one atomic
+// statement, so the reported balance is exactly the result of this credit.
 func (r *Players) AddCoins(id int64, n int) (int, error) {
 	if n <= 0 {
 		return 0, fmt.Errorf("storage: add coins must be positive, got %d", n)
 	}
-	if _, err := r.db.Exec(`UPDATE players SET coins = coins + ? WHERE id = ?`, n, id); err != nil {
+	var balance int
+	err := r.db.QueryRow(
+		`UPDATE players SET coins = coins + ? WHERE id = ? RETURNING coins`, n, id,
+	).Scan(&balance)
+	if err != nil {
 		return 0, fmt.Errorf("storage: add coins: %w", err)
 	}
-	return r.coins(id)
+	return balance, nil
 }
 
 // SpendCoins atomically deducts cost coins if the player can afford it,
 // reporting whether the charge went through and the resulting balance. The
 // guard in the UPDATE makes the check-and-debit a single statement, so two
-// concurrent purchases can never overdraw.
+// concurrent purchases can never overdraw; RETURNING folds the balance read
+// into the same statement.
 func (r *Players) SpendCoins(id int64, cost int) (ok bool, balance int, err error) {
 	if cost < 0 {
 		return false, 0, fmt.Errorf("storage: spend cost must be non-negative, got %d", cost)
 	}
-	res, err := r.db.Exec(`UPDATE players SET coins = coins - ? WHERE id = ? AND coins >= ?`, cost, id, cost)
+	err = r.db.QueryRow(
+		`UPDATE players SET coins = coins - ? WHERE id = ? AND coins >= ? RETURNING coins`,
+		cost, id, cost,
+	).Scan(&balance)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Guard failed (or no such player): nothing was charged.
+		balance, err = r.coins(id)
+		return false, balance, err
+	}
 	if err != nil {
 		return false, 0, fmt.Errorf("storage: spend coins: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, 0, fmt.Errorf("storage: spend coins rows: %w", err)
-	}
-	balance, err = r.coins(id)
-	if err != nil {
-		return false, 0, err
-	}
-	return n == 1, balance, nil
+	return true, balance, nil
 }
 
 // coins reads a player's current coin balance.

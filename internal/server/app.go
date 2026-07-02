@@ -1,6 +1,7 @@
 package server
 
 import (
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -58,6 +59,13 @@ type app struct {
 	worldModel tea.Model
 	worldGen   int
 
+	// worldStop halts the current world's background renderer. One session
+	// teardown reads it (under the mutex) instead of appending a teardown
+	// closure per world entry, so re-entering portals doesn't accumulate
+	// stale Stop funcs over dead models for the life of the session.
+	worldStopMu sync.Mutex
+	worldStop   func()
+
 	// internal carries world-exit notifications; done unblocks the
 	// listener when the session ends so its goroutine never leaks.
 	internal chan tea.Msg
@@ -86,6 +94,7 @@ func newApp(deps appDeps, theme style.Theme, fingerprint string, player *storage
 		}
 	}
 	deps.onTeardown(closeOnce)
+	deps.onTeardown(a.stopWorld) // halt whichever world renderer is live at disconnect
 
 	if player != nil {
 		a.join(*player)
@@ -218,9 +227,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case worldExitMsg:
 		if msg.gen == a.worldGen && a.state == stateWorld {
 			a.state = statePlaza
-			if s, ok := a.worldModel.(interface{ Stop() }); ok {
-				s.Stop() // halt the world's renderer before we drop it
-			}
+			a.stopWorld() // halt the world's renderer before we drop it
 			a.worldModel = nil
 			if a.handle != nil {
 				a.handle.SetBusy(false)
@@ -309,11 +316,9 @@ func (a *app) enterWorld(msg overworld.EnterPortalMsg) (tea.Model, tea.Cmd) {
 		Exit:      exit,
 	}
 	a.worldModel = w.Init(ctx)
-	// A graphical world renders on its own; stop it when the session ends so the
-	// goroutine/ticker never outlives the connection.
-	if s, ok := a.worldModel.(interface{ Stop() }); ok {
-		a.deps.onTeardown(s.Stop)
-	}
+	// A graphical world renders on its own; track its Stop so the session
+	// teardown (or the exit back to the plaza) halts it.
+	a.setWorldStop(a.worldModel)
 	a.state = stateWorld
 	if a.handle != nil {
 		a.handle.SetBusy(true) // can't be challenged while inside a world
@@ -344,9 +349,7 @@ func (a *app) enterPvP(msg overworld.StartPvPMsg) (tea.Model, tea.Cmd) {
 	cw, ch := a.cellSize()
 	render := world.Render{Palette: a.deps.env.Pal, Out: a.deps.env.Out, CellW: cw, CellH: ch}
 	a.worldModel = shellmonworld.NewPvP(render, msg.Match, msg.SideA, msg.Opponent, exit)
-	if s, ok := a.worldModel.(interface{ Stop() }); ok {
-		a.deps.onTeardown(s.Stop)
-	}
+	a.setWorldStop(a.worldModel)
 	a.state = stateWorld
 	if a.handle != nil {
 		a.handle.SetBusy(true)
@@ -360,6 +363,29 @@ func (a *app) enterPvP(msg overworld.StartPvPMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 	return a, tea.Batch(cmds...)
+}
+
+// setWorldStop records the current world's Stop func (if it has one) for the
+// exit path and the session teardown. Safe against the teardown goroutine.
+func (a *app) setWorldStop(m tea.Model) {
+	a.worldStopMu.Lock()
+	defer a.worldStopMu.Unlock()
+	if s, ok := m.(interface{ Stop() }); ok {
+		a.worldStop = s.Stop
+	} else {
+		a.worldStop = nil
+	}
+}
+
+// stopWorld halts the current world's renderer, if any, exactly once.
+func (a *app) stopWorld() {
+	a.worldStopMu.Lock()
+	stop := a.worldStop
+	a.worldStop = nil
+	a.worldStopMu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // overPlayer extracts the player identity for world contexts.

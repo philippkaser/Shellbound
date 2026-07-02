@@ -56,6 +56,8 @@ type Hub struct {
 	// challenges holds the pending PvP challenge per target player id (one at a
 	// time; a fresh challenge replaces an older one).
 	challenges map[int64]pendingChallenge
+	// lastExpiry is when the sweep last pruned expired challenges.
+	lastExpiry time.Time
 }
 
 // New creates an empty hub.
@@ -83,9 +85,25 @@ func (h *Hub) Run(ctx context.Context) {
 }
 
 // sweep broadcasts the states of all dirty sessions and clears the flags.
+// It also lazily expires pending PvP challenges (about once a second) so an
+// ignored challenge tells the challenger instead of dangling forever.
 func (h *Hub) sweep() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if now := time.Now(); now.Sub(h.lastExpiry) >= time.Second {
+		h.lastExpiry = now
+		for target, pc := range h.challenges {
+			if now.Sub(pc.at) <= challengeTTL {
+				continue
+			}
+			delete(h.challenges, target)
+			if ch, ok := h.sessions[pc.fromSID]; ok {
+				ch.send(EvBattleDeclined{From: pc.fromInfo, Reason: "your challenge expired unanswered"})
+			}
+		}
+	}
+
 	var states []PlayerState
 	for _, s := range h.sessions {
 		if s.dirty {
@@ -115,6 +133,28 @@ func (s *session) send(ev Event) {
 		// chat loss under a 256-event backlog means the session is doomed
 		// anyway.
 	}
+}
+
+// trySend is send for events that must not be silently lost (battle starts,
+// challenges): it reports whether the event was actually enqueued so the
+// caller can back out of state changes instead of leaving a player half-in
+// a battle that never reaches them. Callers must hold h.mu.
+func (s *session) trySend(ev Event) bool {
+	if s.closed {
+		return false
+	}
+	select {
+	case s.ch <- ev:
+		return true
+	default:
+		return false
+	}
+}
+
+// canSend reports whether the session's buffer has room. All sends happen
+// under h.mu, so under the write lock this is a reliable reservation check.
+func (s *session) canSend() bool {
+	return !s.closed && len(s.ch) < cap(s.ch)
 }
 
 // Join registers a player session and returns a Handle plus a snapshot of
@@ -256,6 +296,9 @@ func (h *Hub) challengePvP(fromSID string, toPlayerID int64, team []*shellmon.Cr
 	if !ok {
 		return false, "you are not connected"
 	}
+	if from.info.ID == toPlayerID {
+		return false, "you can't duel yourself"
+	}
 	toSID, ok := h.byPlayer[toPlayerID]
 	if !ok {
 		return false, "they're not online"
@@ -267,10 +310,20 @@ func (h *Hub) challengePvP(fromSID string, toPlayerID int64, team []*shellmon.Cr
 	if to.busy {
 		return false, to.info.Name + " is busy"
 	}
-	h.challenges[toPlayerID] = pendingChallenge{
+	// A fresh challenge replaces an older pending one; tell the displaced
+	// challenger rather than letting them wait on nothing.
+	if prev, ok := h.challenges[toPlayerID]; ok && prev.fromSID != fromSID {
+		if prevS, ok := h.sessions[prev.fromSID]; ok {
+			prevS.send(EvBattleDeclined{From: to.info, Reason: to.info.Name + " received another challenge"})
+		}
+	}
+	pc := pendingChallenge{
 		fromID: from.info.ID, fromSID: fromSID, fromInfo: from.info, team: team, at: time.Now(),
 	}
-	to.send(EvBattleChallenge{From: from.info})
+	if !to.trySend(EvBattleChallenge{From: from.info}) {
+		return false, to.info.Name + " is not responding"
+	}
+	h.challenges[toPlayerID] = pc
 	return true, ""
 }
 
@@ -298,8 +351,23 @@ func (h *Hub) respondPvP(responderSID string, challengerID int64, accept bool, t
 		}
 		return
 	}
+	// Re-validate the challenger: it must still be the same session that
+	// issued the challenge and must not have gone busy (entered a portal
+	// world or another battle) in the meantime — otherwise accepting would
+	// yank a player out of whatever they're doing, or soft-lock them.
+	if chSID != pc.fromSID || chSession.busy {
+		resp.send(EvBattleDeclined{From: pc.fromInfo, Reason: pc.fromInfo.Name + " is no longer available"})
+		return
+	}
 
-	// Build the single shared match (challenger = side A) and start both sides.
+	// Build the single shared match (challenger = side A) and start both
+	// sides. EvBattleStart must not be dropped — a player flagged busy who
+	// never receives the match is soft-locked — so reserve room in both
+	// buffers before flipping any state.
+	if !chSession.canSend() || !resp.canSend() {
+		resp.send(EvBattleDeclined{From: pc.fromInfo, Reason: pc.fromInfo.Name + " is not responding"})
+		return
+	}
 	match := shellmon.NewMatch(pc.team, team, time.Now().UnixNano())
 	resp.busy, chSession.busy = true, true
 	chSession.send(EvBattleStart{Match: match, SideA: true, Opponent: resp.info})
@@ -323,7 +391,7 @@ func (h *Hub) whisper(fromSID string, toPlayerID int64, text string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	from, ok := h.sessions[fromSID]
-	if !ok {
+	if !ok || from.info.ID == toPlayerID {
 		return false
 	}
 	toSID, ok := h.byPlayer[toPlayerID]

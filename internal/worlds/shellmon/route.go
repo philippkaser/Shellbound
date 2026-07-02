@@ -452,8 +452,9 @@ func (m *model) drawRoute(pw, ph int, t float64) {
 	r := m.route
 	// Camera centered on the player, exactly like the plaza.
 	csx, csy := iso.Project(float64(r.px), float64(r.py))
+	// Focus on the tile's centre so the player's cell sits dead-centre.
 	originSx := csx - float64(pw)/2
-	originSy := csy - float64(ph)/2
+	originSy := csy + float64(iso.HH) - float64(ph)/2
 	project := func(gx, gy int) (int, int) {
 		sx, sy := iso.Project(float64(gx), float64(gy))
 		return int(sx - originSx), int(sy - originSy)

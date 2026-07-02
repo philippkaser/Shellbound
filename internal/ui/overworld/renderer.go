@@ -244,8 +244,10 @@ func (r *Renderer) build(snap frameSnapshot, dt, t float64, now time.Time) strin
 	}
 
 	csx, csy := iso.Project(r.camX, r.camY)
+	// Focus on the tile's centre (not its top vertex), so the player's cell —
+	// and thus the avatar's feet — land dead-centre in the viewport.
 	originSx := csx - float64(pw)/2
-	originSy := csy - float64(ph)/2
+	originSy := csy + float64(iso.HH) - float64(ph)/2
 
 	r.world.RenderIso(r.screen, originSx, originSy, t)
 	for _, p := range plaza.Portals {

@@ -278,18 +278,18 @@ func (m *pvpModel) draw(pw, ph int, t float64) {
 	fx, fy := pw*70/100, ph*36/100
 	drawPlatform(m.scr, fx, fy+34, 70)
 	if !m.foeFX.gone() {
-		mon.DrawCreature(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, v.Foe.Species)
+		mon.DrawCreatureT(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, v.Foe.Species, t, 1.7)
 	}
-	infoCard(m.scr, 30, 40, 250, v.Foe.Name, v.Foe.Level, m.foeFX.shownHP(), v.Foe.MaxHP, false, typeColor(v.Foe.Type))
+	infoCard(m.scr, 30, 40, 250, v.Foe.Name, v.Foe.Level, m.foeFX.realHP(), m.foeFX.shownHP(), v.Foe.MaxHP, false, typeColor(v.Foe.Type))
 	teamPips(m.scr, 30, 74, v.FoeTotal, v.FoeAlive)
 
 	// You (lower-left).
 	yx, yy := pw*30/100, ph*72/100
 	drawPlatform(m.scr, yx, yy+20, 92)
 	if !m.youFX.gone() {
-		mon.DrawCreature(m.scr, yx+m.youFX.shakeX(), yy-10+bob+m.youFX.sinkY(), 4, v.You.Species)
+		mon.DrawCreatureT(m.scr, yx+m.youFX.shakeX(), yy-10+bob+m.youFX.sinkY(), 4, v.You.Species, t, 0)
 	}
-	infoCard(m.scr, pw-290, ph*52/100, 260, v.You.Name, v.You.Level, m.youFX.shownHP(), v.You.MaxHP, true, typeColor(v.You.Type))
+	infoCard(m.scr, pw-290, ph*52/100, 260, v.You.Name, v.You.Level, m.youFX.realHP(), m.youFX.shownHP(), v.You.MaxHP, true, typeColor(v.You.Type))
 	teamPips(m.scr, pw-290, ph*52/100+44, len(v.Party), v.YouAlive)
 
 	// Move casts and impact bursts for the current turn.

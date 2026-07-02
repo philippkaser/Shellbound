@@ -118,18 +118,6 @@ func (b *Battle) NeedsSwitch(a bool) bool {
 	return team[*idx].c.Fainted() && b.AliveCount(a) > 0
 }
 
-// LegalSwitches returns the slots a side may switch to (alive and not active).
-func (b *Battle) LegalSwitches(a bool) []int {
-	team, idx := b.side(a)
-	var out []int
-	for i, m := range team {
-		if i != *idx && !m.c.Fainted() {
-			out = append(out, i)
-		}
-	}
-	return out
-}
-
 // Done reports whether the battle is over; WinnerA says which side won.
 func (b *Battle) Done() bool    { return b.done }
 func (b *Battle) WinnerA() bool { return b.winnerA }

@@ -519,10 +519,27 @@ func drawIsoTree(c *canvas.Canvas, baseX, baseY, seed int) {
 		}
 	}
 	c.FillRect(baseX-2, baseY-18, 4, 18, canvas.Color(0x3A2F2A)) // trunk
-	// Canopy: two overlapping top-lit blobs for a fuller silhouette.
-	canopy(c, baseX-5, baseY-26, 12)
-	canopy(c, baseX+5, baseY-24, 11)
-	canopy(c, baseX, baseY-32, 13)
+	// Canopy: overlapping top-lit blobs. The seed jitters radii and offsets
+	// and picks one of three silhouettes, so a treeline reads as a forest
+	// instead of one tree stamped on repeat.
+	h := uint32(seed) * 2654435761
+	j := func(n uint, span int) int { // deterministic jitter in [-span, span]
+		return int((h>>(n*3))&7)%(2*span+1) - span
+	}
+	switch int(h>>13) % 3 {
+	case 0: // classic triple crown
+		canopy(c, baseX-5+j(0, 2), baseY-26+j(1, 2), 11+j(2, 1))
+		canopy(c, baseX+5+j(3, 2), baseY-24+j(4, 2), 10+j(5, 1))
+		canopy(c, baseX+j(6, 1), baseY-32+j(7, 2), 12+j(8, 1))
+	case 1: // tall and narrow
+		canopy(c, baseX+j(0, 1), baseY-24, 9+j(1, 1))
+		canopy(c, baseX+j(2, 2), baseY-33, 10+j(3, 1))
+		canopy(c, baseX+j(4, 1), baseY-41+j(5, 1), 8+j(6, 1))
+	default: // broad and squat
+		canopy(c, baseX-8+j(0, 2), baseY-23, 10+j(1, 1))
+		canopy(c, baseX+8+j(2, 2), baseY-23, 10+j(3, 1))
+		canopy(c, baseX+j(4, 2), baseY-29+j(5, 1), 12+j(6, 1))
+	}
 }
 
 func canopy(c *canvas.Canvas, cx, cy, r int) {

@@ -73,4 +73,17 @@ func TestRenderAreaPreviews(t *testing.T) {
 	m.scr.Clear(canvas.Black)
 	m.drawParty(pw, ph, 0.6)
 	savePNG(t, dir, "party_badges", m.scr)
+
+	// Battle scenes: mid-fight with each element's impact burst playing.
+	for i, species := range []string{"flickit", "dripling", "sprigling"} {
+		bm := newTestModel(int64(i))
+		bm.scr = canvas.New(pw, ph)
+		bm.roster = []*mon.Creature{mon.NewCreature("cindle", 12)}
+		bm.beginBattle([]*mon.Creature{mon.NewCreature(species, 9)}, true, "")
+		bm.bt.b.Active(false).CurHP /= 2
+		bm.playerAttack(0)
+		bm.scr.Clear(canvas.Black)
+		bm.drawBattle(pw, ph, 0.6)
+		savePNG(t, dir, "battle_"+species, bm.scr)
+	}
 }

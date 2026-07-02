@@ -212,13 +212,6 @@ func combatant(c *Creature, slot int) Combatant {
 	return cb
 }
 
-// ActiveIndexFor exposes the on-field slot for a side (for the switch cursor).
-func (m *Match) ActiveIndexFor(sideA bool) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.b.ActiveIndex(sideA)
-}
-
 // actionMoveType returns the elemental type of an attack action and whether it
 // is a damaging move worth animating a cast for.
 func actionMoveType(c *Creature, act Action) (Type, bool) {

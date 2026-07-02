@@ -27,15 +27,30 @@ const (
 )
 
 // spriteCtx carries the draw target, the creature center and the scale unit.
+// blink closes the eyes for the current frame (a periodic idle tick).
 type spriteCtx struct {
 	c      *canvas.Canvas
 	cx, cy int
 	u      int
+	blink  bool
 }
 
 // DrawCreature paints a species centered at (cx, cy) at scale u. The center is
 // the body's middle; sprites extend roughly ±11·u in each direction.
 func DrawCreature(c *canvas.Canvas, cx, cy, u int, speciesKey string) {
+	drawCreature(c, cx, cy, u, speciesKey, false)
+}
+
+// DrawCreatureT paints a species with its idle animation at time t: the
+// creature blinks every few seconds. phase staggers individuals so a pair on
+// a battle stage never blinks in lockstep.
+func DrawCreatureT(c *canvas.Canvas, cx, cy, u int, speciesKey string, t, phase float64) {
+	// A 0.14s blink roughly every 3.7s, offset by phase.
+	cycle := math.Mod(t+phase*1.31, 3.7)
+	drawCreature(c, cx, cy, u, speciesKey, cycle < 0.14)
+}
+
+func drawCreature(c *canvas.Canvas, cx, cy, u int, speciesKey string, blink bool) {
 	sp, ok := bySpecies[speciesKey]
 	if !ok || sp.sprite == nil {
 		return
@@ -43,7 +58,7 @@ func DrawCreature(c *canvas.Canvas, cx, cy, u int, speciesKey string) {
 	if u < 1 {
 		u = 1
 	}
-	sp.sprite(&spriteCtx{c: c, cx: cx, cy: cy, u: u})
+	sp.sprite(&spriteCtx{c: c, cx: cx, cy: cy, u: u, blink: blink})
 }
 
 func sramp(v float64) canvas.Color {
@@ -154,16 +169,21 @@ func (s *spriteCtx) glint(ox, oy int) {
 
 // eye draws a small glossy eye — a dark bead with a thin rim and a single
 // shine, so it reads as a creature's eye rather than a googly cartoon one.
-// fierce adds a thin slanted brow for a sharper expression.
+// fierce adds a thin slanted brow for a sharper expression. During a blink
+// the bead collapses to a closed lid line.
 func (s *spriteCtx) eye(ox, oy int, fierce bool) {
 	cx, cy := s.cx+ox*s.u, s.cy+oy*s.u
 	r := s.u / 2
 	if r < 1 {
 		r = 1
 	}
-	s.c.FillCircle(cx, cy, r+1, sOutline) // thin rim
-	s.c.FillCircle(cx, cy, r, sDark)      // dark bead
-	s.c.Set(cx-r/2, cy-r/2, sGlint)       // shine
+	if s.blink {
+		s.c.HLine(cx-r-1, cx+r+1, cy, sOutline) // closed lid
+	} else {
+		s.c.FillCircle(cx, cy, r+1, sOutline) // thin rim
+		s.c.FillCircle(cx, cy, r, sDark)      // dark bead
+		s.c.Set(cx-r/2, cy-r/2, sGlint)       // shine
+	}
 	if fierce {
 		for i := 0; i <= r+1; i++ {
 			s.c.Set(cx-r-1+i, cy-r-2-i/2, sOutline) // slanted brow

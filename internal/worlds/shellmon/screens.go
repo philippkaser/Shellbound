@@ -52,7 +52,7 @@ func (m *model) drawStarter(pw, ph int, t float64) {
 		if i == m.starterCursor {
 			bob = int(2 * sinf(t*3))
 		}
-		mon.DrawCreature(m.scr, x+cardW/2, y+cardH/2-10+bob, 4, sp.Key)
+		mon.DrawCreatureT(m.scr, x+cardW/2, y+cardH/2-10+bob, 4, sp.Key, t, float64(i))
 		name := sp.Name
 		m.scr.DrawText(x+cardW/2-canvas.TextWidth(name)/2, y+cardH-44, name, uiText)
 		badge := typeBadge(sp.Type)
@@ -105,7 +105,7 @@ func (m *model) drawParty(pw, ph int, t float64) {
 		m.scr.DrawText(lx, y, c.Name(), uiText)
 		lv := "Lv" + itoa(c.Level) + " " + typeBadge(c.Type())
 		m.scr.DrawText(lx+180, y, lv, uiDim)
-		hpBar(m.scr, lx, y+14, 300, c.CurHP, c.MaxHP())
+		hpBar(m.scr, lx, y+14, 300, c.CurHP, c.CurHP, c.MaxHP())
 		if i == 0 {
 			m.scr.DrawText(lx+180+canvas.TextWidth(lv)+10, y, "lead", uiDim)
 		}
@@ -115,7 +115,7 @@ func (m *model) drawParty(pw, ph int, t float64) {
 	if m.partyCur < len(m.roster) {
 		c := m.roster[m.partyCur]
 		px := pw*3/4 - 20
-		mon.DrawCreature(m.scr, px, ph/2-30, 5, c.Species)
+		mon.DrawCreatureT(m.scr, px, ph/2-30, 5, c.Species, t, float64(m.partyCur))
 		m.scr.DrawText(px-canvas.TextWidth(c.Name())/2, ph/2+50, c.Name(), uiText)
 		stat := "HP " + itoa(c.CurHP) + "/" + itoa(c.MaxHP()) + "   ATK " + itoa(c.Atk()) + "   DEF " + itoa(c.Def()) + "   SPD " + itoa(c.Spd())
 		m.scr.DrawText(px-canvas.TextWidth(stat)/2, ph/2+66, stat, uiDim)

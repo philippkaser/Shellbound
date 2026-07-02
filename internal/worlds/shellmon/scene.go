@@ -40,6 +40,19 @@ func drawArena(c *canvas.Canvas, pw, ph int, t float64) {
 	ridge(c, pw, horizon, 44, 0.012, 0.0, canvas.Color(0x141414))
 	ridge(c, pw, horizon, 28, 0.020, 2.1, canvas.Color(0x080808))
 
+	// A low fog bank drifting slowly along the far ridge line: a soft sine
+	// band a hair brighter than the ridges, so the backdrop breathes without
+	// stealing attention (or colour).
+	for x := 0; x < pw; x++ {
+		fx := float64(x)
+		h := 6 + 4*math.Sin(fx*0.017+t*0.35) + 2.5*math.Sin(fx*0.041-t*0.22)
+		top := horizon - int(h)
+		for y := top; y < horizon; y++ {
+			fade := float64(y-top) / math.Max(1, float64(horizon-top))
+			lighten(c, x, y, canvas.RGB(16, 16, 17).Scale(0.4+0.6*fade))
+		}
+	}
+
 	// One crisp, bright horizon line (the brightest thing on the stage).
 	for x := 0; x < pw; x++ {
 		c.Set(x, horizon, canvas.RGB(190, 190, 195))

@@ -27,6 +27,7 @@ const (
 	uiTrack  = canvas.Color(0x303030)
 	uiBar    = canvas.Color(0xD8D8D8)
 	uiBarLow = canvas.Color(0x808080)
+	uiGhost  = canvas.Color(0x5A5A5A) // just-lost HP chunk, draining after a beat
 	uiSelBG  = canvas.Color(0x2A2A2A)
 )
 
@@ -59,18 +60,31 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// hpBar draws a health bar of width w at (x, y) for cur/max HP.
-func hpBar(c *canvas.Canvas, x, y, w, cur, max int) {
+// hpBar draws a health bar of width w at (x, y) for cur/max HP, with a
+// classic "ghost" trail: when ghost > cur, the just-lost chunk lingers in a
+// mid grey and drains after a beat, so damage magnitude reads at a glance.
+// Pass ghost == cur for a plain bar.
+func hpBar(c *canvas.Canvas, x, y, w, cur, ghost, max int) {
 	if max < 1 {
 		max = 1
 	}
 	if cur < 0 {
 		cur = 0
 	}
+	if ghost < cur {
+		ghost = cur
+	}
 	const h = 6
 	c.FillRect(x, y, w, h, uiTrack)
 	c.Rect(x-1, y-1, w+2, h+2, uiDim)
 	fill := (w - 2) * cur / max
+	gfill := (w - 2) * ghost / max
+	if gfill > w-2 {
+		gfill = w - 2
+	}
+	if gfill > fill {
+		c.FillRect(x+1+fill, y+1, gfill-fill, h-2, uiGhost)
+	}
 	col := uiBar
 	if cur*4 <= max {
 		col = uiBarLow // low health reads dimmer
@@ -81,9 +95,10 @@ func hpBar(c *canvas.Canvas, x, y, w, cur, max int) {
 }
 
 // infoCard draws a name, level and HP bar in a small box anchored at (x, y).
-// withHP shows the numeric HP under the bar (used for the player side); nameCol
-// tints the name with the creature's type hue (the card's small colour pop).
-func infoCard(c *canvas.Canvas, x, y, w int, name string, level, cur, max int, withHP bool, nameCol canvas.Color) {
+// ghost is the trailing HP-bar value (see hpBar). withHP shows the numeric HP
+// under the bar (used for the player side); nameCol tints the name with the
+// creature's type hue (the card's small colour pop).
+func infoCard(c *canvas.Canvas, x, y, w int, name string, level, cur, ghost, max int, withHP bool, nameCol canvas.Color) {
 	h := 30
 	if withHP {
 		h = 40
@@ -92,7 +107,7 @@ func infoCard(c *canvas.Canvas, x, y, w int, name string, level, cur, max int, w
 	c.DrawText(x+8, y+6, name, nameCol)
 	lv := "Lv" + itoa(level)
 	c.DrawText(x+w-canvas.TextWidth(lv)-8, y+6, lv, uiDim)
-	hpBar(c, x+8, y+18, w-16, cur, max)
+	hpBar(c, x+8, y+18, w-16, cur, ghost, max)
 	if withHP {
 		hp := itoa(cur) + "/" + itoa(max)
 		c.DrawText(x+w-canvas.TextWidth(hp)-8, y+27, hp, uiDim)

@@ -386,7 +386,7 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	fx, fy := pw*70/100, ph*36/100
 	drawPlatform(m.scr, fx, fy+34, 70)
 	if !m.foeFX.gone() {
-		mon.DrawCreature(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, foe.Species)
+		mon.DrawCreatureT(m.scr, fx+m.foeFX.shakeX(), fy+bob+m.foeFX.sinkY(), 3, foe.Species, t, 1.7)
 	}
 	if p := m.foeFX.appearP(); p < 1 {
 		drawSendFlash(m.scr, fx, fy+10, p, typeColor(foe.Type()))
@@ -394,13 +394,13 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	if p := m.foeFX.koP(); p >= 0 {
 		drawKOBurst(m.scr, fx, fy+30, p, typeColor(foe.Type()))
 	}
-	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, m.foeFX.shownHP(), foe.MaxHP(), false, typeColor(foe.Type()))
+	infoCard(m.scr, 30, 40, 250, foe.Name(), foe.Level, m.foeFX.realHP(), m.foeFX.shownHP(), foe.MaxHP(), false, typeColor(foe.Type()))
 
 	// Player active (lower-left), bigger, info card lower-right.
 	yx, yy := pw*30/100, ph*72/100
 	drawPlatform(m.scr, yx, yy+20, 92)
 	if !m.youFX.gone() {
-		mon.DrawCreature(m.scr, yx+m.youFX.shakeX(), yy-10+bob+vbob+m.youFX.sinkY(), 4, you.Species)
+		mon.DrawCreatureT(m.scr, yx+m.youFX.shakeX(), yy-10+bob+vbob+m.youFX.sinkY(), 4, you.Species, t, 0)
 	}
 	if p := m.youFX.appearP(); p < 1 {
 		drawSendFlash(m.scr, yx, yy-6, p, typeColor(you.Type()))
@@ -408,7 +408,7 @@ func (m *model) drawBattle(pw, ph int, t float64) {
 	if p := m.youFX.koP(); p >= 0 {
 		drawKOBurst(m.scr, yx, yy+6, p, typeColor(you.Type()))
 	}
-	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, m.youFX.shownHP(), you.MaxHP(), true, typeColor(you.Type()))
+	infoCard(m.scr, pw-290, ph*52/100, 260, you.Name(), you.Level, m.youFX.realHP(), m.youFX.shownHP(), you.MaxHP(), true, typeColor(you.Type()))
 
 	// Move casts and impact bursts for the current turn.
 	m.anim.draw(m.scr, yx, yy-10, fx, fy)
